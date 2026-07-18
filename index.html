@@ -1,0 +1,1532 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>기록</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="js/jsbarcode.js"></script>
+<style>
+  :root{
+    --mono:'IBM Plex Mono', ui-monospace, monospace;
+    --paper:#ffffff;          /* 영수증 종이 = 완전 흰색 */
+    --print:#1c1a17;          /* 인쇄 잉크 */
+    --faint:#9a948a;
+    --canvas:#ffffff;         /* 배경 = 순수 흰색 (확정). 어둡게는 토글로만 */
+    --rule: rgba(28,26,23,.5);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0; background:var(--canvas); color:var(--print); font-family:var(--mono);
+    -webkit-font-smoothing:antialiased; transition:background .35s ease;
+    font-variant-numeric:tabular-nums;
+    display:flex; flex-direction:column; min-height:100vh;}
+  body[data-theme="dark"]{ --canvas:#15120f; }
+
+  /* 상단 컨트롤바 (시안 하네스) */
+  .bar{display:flex; gap:8px; justify-content:center; align-items:center; padding:18px 16px 6px; flex-wrap:wrap;}
+  .bar .seg{display:flex; gap:6px;}
+  .bar button{cursor:pointer; font-family:var(--mono); font-size:11px; letter-spacing:.4px;
+    padding:7px 14px; border-radius:999px; border:1px solid rgba(128,120,108,.5);
+    background:transparent; color:var(--print); opacity:.7; transition:.15s;}
+  body[data-theme="dark"] .bar button{ color:#e8e3da; border-color:rgba(180,172,160,.4);}
+  .bar button:hover{opacity:1;}
+  .bar button.on{background:var(--print); color:var(--paper); border-color:var(--print); opacity:1;}
+  body[data-theme="dark"] .bar button.on{ background:#e8e3da; color:#15120f;}
+  .bar .gap{width:18px}
+
+  /* 16:9 스테이지 */
+  .stage{flex:1; width:100%; max-width:1180px; margin:10px auto 0; aspect-ratio:16/9;
+    min-height:0; overflow:auto; overflow-x:hidden; padding:40px 28px 64px; scrollbar-width:thin;}
+  .stage::-webkit-scrollbar{width:8px; height:8px}
+  .stage::-webkit-scrollbar-thumb{background:rgba(120,112,100,.35); border-radius:8px}
+
+  /* ── 영수증 (평평한 흰 종이, 빼곡한 타입) ───────────── */
+  .receipt{position:relative; width:300px; background:var(--paper); color:var(--print);
+    font-size:11px; line-height:1.32; letter-spacing:-.1px; padding:24px 22px 26px;}
+  body[data-theme="dark"] .receipt{ filter:drop-shadow(0 16px 32px rgba(0,0,0,.55));}
+  /* 하프톤 그림자 — 부드러운 그림자 덩어리(단일 광원 — 위·왼쪽에서 빛이 와 그림자는 아래·오른쪽으로만)에
+     도트 마스크를 씌우고, clip-path로 종이 자리만 정확히 구멍 낸다. 구멍 좌표는 인셋과 대칭이라
+     (calc(100% - 인셋)) 종이 크기·패딩이 달라도 항상 정확히 맞는다. 위·왼쪽은 판 자체를 사실상
+     늘리지 않아(1px) 그쪽으로 새어나갈 자리가 없다 — 광원 반대편에 그림자가 생기는 일이 없다.
+     폭·도트 피치는 --shR/--shB/--shD 변수로 — 작은 종이는 그림자도 비례해 작게(아래 오버라이드). */
+  .receipt, .mappaper, .peek{ --shR:10px; --shB:12px; --shD:2.6px; }
+  .print, .rmini, .bundle .s1, .benv{ --shR:5px; --shB:6px; --shD:2px; }
+  .receipt::after, .print::after, .rmini::after, .bundle .s1::after, .mappaper::after, .peek::after, .benv::after{
+    content:""; position:absolute; pointer-events:none;
+    top:-1px; left:-1px; right:calc(-1 * var(--shR)); bottom:calc(-1 * var(--shB));
+    background:radial-gradient(ellipse 88% 82% at 76% 74%,
+      rgba(20,14,8,.32), rgba(20,14,8,.15) 46%, rgba(20,14,8,.05) 70%, rgba(20,14,8,0) 88%);
+    -webkit-mask-image:radial-gradient(circle, #000 calc(var(--shD) * .21), transparent calc(var(--shD) * .35));
+    -webkit-mask-size:var(--shD) var(--shD);
+    mask-image:radial-gradient(circle, #000 calc(var(--shD) * .21), transparent calc(var(--shD) * .35));
+    mask-size:var(--shD) var(--shD);
+    clip-path:polygon(evenodd, 0 0, 100% 0, 100% 100%, 0 100%,
+      1px 1px, calc(100% - var(--shR)) 1px, calc(100% - var(--shR)) calc(100% - var(--shB)), 1px calc(100% - var(--shB)));}
+  body[data-theme="dark"] .receipt::after, body[data-theme="dark"] .print::after,
+  body[data-theme="dark"] .rmini::after, body[data-theme="dark"] .bundle .s1::after,
+  body[data-theme="dark"] .mappaper::after, body[data-theme="dark"] .peek::after,
+  body[data-theme="dark"] .benv::after{display:none;}
+  body[data-theme="dark"] .peek{filter:drop-shadow(0 14px 28px rgba(0,0,0,.5));}
+
+  .r-center{text-align:center}
+  .r-wordmark{font-weight:700; font-size:22px; letter-spacing:.5px; line-height:1;}
+  .r-tag{font-size:9.5px; letter-spacing:1.3px; line-height:1.5; margin-top:6px;}
+  .r-meta{display:flex; justify-content:space-between; font-size:10.5px; margin-top:9px;}
+  .rule{height:0; margin:6px 0; border-top:1px dashed var(--rule);}
+  .rule.solid{border-top:1px solid var(--print); margin:7px 0;}
+  .stars{text-align:center; letter-spacing:1px; font-size:10px; overflow:hidden; white-space:nowrap; line-height:1.1;}
+  .sec{text-align:center; font-size:10px; letter-spacing:1.3px; line-height:1.5;}
+  .li{display:flex; gap:8px; line-height:1.4;}
+  .li .n{color:var(--faint)}
+  .li .sub{color:var(--faint); font-size:10px;}
+  .dots{letter-spacing:.5px}
+  .kw{border-bottom:1px solid var(--print); cursor:pointer;}
+  .kw:hover{background:rgba(201,162,39,.22)}
+  .r-foot{font-size:10px; line-height:1.5; text-align:center;}
+  .ascii{font-size:8.5px; line-height:1; white-space:pre; text-align:center; letter-spacing:0; opacity:.9; margin:2px 0;}
+  .r-title{font-weight:600; font-size:13px; text-align:center; line-height:1.3; margin:4px 0 6px;}
+  .r-note{margin:5px 1px; text-align:justify; line-height:1.45;}
+
+  /* 사진 = 컬러 출력사진(프린트). 영수증 옆에 흩어 배치 */
+  .scene{position:relative; width:760px; max-width:100%; margin:0 auto;}
+  .scene > .receipt{margin:0 auto; z-index:2;}
+  .print{position:absolute; width:178px; background:#fff; padding:9px 9px 11px; z-index:1;}
+  body[data-theme="dark"] .print{ filter:drop-shadow(0 16px 32px rgba(0,0,0,.6)); }
+  .print .img{height:150px; border-radius:1px; background-size:cover; background-position:center;}
+  .print .cap{font-family:var(--mono); font-size:9px; color:#9a948a; text-align:center;
+    margin-top:8px; letter-spacing:.3px;}
+
+  /* 데일리 룩백 — 이동 미니맵 + 그날의 도장 */
+  .map{margin:5px 0 2px}
+  .map svg{width:100%; height:auto; display:block}
+  .stamps{display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin:7px 0 3px;}
+  .stamp{text-align:center}
+  .stamp .ic{width:32px; height:32px; border-radius:50%; border:1.2px solid var(--print);
+    display:flex; align-items:center; justify-content:center; margin:0 auto; color:var(--print);}
+  .stamp .ic svg{width:17px; height:17px; display:block;}
+  .stamp .lb{font-size:8px; color:var(--faint); margin-top:3px; letter-spacing:.2px;}
+  .note-you{margin:7px 1px 9px; text-align:justify; line-height:1.6;}
+
+  /* 홈 = 큰 영수증 하나 + 아래 미니 목록 */
+  .single{display:flex; flex-direction:column; align-items:center; gap:26px;}
+  .single .receipt{width:372px; font-size:11.5px;}
+  .mini-list{width:372px; max-width:88vw;}
+  .mini-list .mh{font-size:9.5px; letter-spacing:2px; color:var(--faint); text-align:center; padding:8px 0;}
+  .mrow{display:grid; grid-template-columns:66px 1fr auto; gap:12px; align-items:baseline;
+    padding:7px 6px; border-top:1px dashed var(--rule); cursor:pointer; transition:.12s; font-size:11px;}
+  body[data-theme="dark"] .mrow{color:#e8e3da}
+  .mrow:hover{background:rgba(128,120,108,.12)}
+  .mrow .d{color:var(--faint)}
+  .mrow .v{font-size:10px; color:var(--faint); text-align:right}
+  .hint{display:none;}
+  /* 모아보기 탭 안의 모드 인디케이터 — 평소엔 숨김, 호버·선택 시 하위 메뉴처럼 펼쳐짐 */
+  .modeic{display:inline-flex; gap:5px; vertical-align:-1.5px; max-width:0; opacity:0;
+    margin-left:0; overflow:hidden; transition:max-width .22s ease, opacity .18s ease, margin-left .22s ease;}
+  #tabs button:hover .modeic, #tabs button.on .modeic{max-width:34px; opacity:1; margin-left:8px;}
+  .modeic .mic{display:inline-flex; cursor:pointer; opacity:.35; transition:opacity .15s; flex:0 0 auto;}
+  .modeic .mic:hover{opacity:.75;}
+  .modeic .mic.cur{opacity:1;}
+
+  /* 바코드 (영수증 하단) */
+  .barcode{height:30px; margin:8px auto 0; width:78%;
+    background:repeating-linear-gradient(90deg,
+      var(--print) 0 1.5px, transparent 1.5px 4px,
+      var(--print) 4px 5px,  transparent 5px 7px,
+      var(--print) 7px 10px, transparent 10px 12px,
+      var(--print) 12px 13px, transparent 13px 17px);}
+  .bc-num{text-align:center; font-size:9px; letter-spacing:3.5px; color:var(--faint); margin:3px 0 4px;}
+
+  /* 잠금 화면 — 비밀번호 입력 */
+  .pw{display:flex; gap:8px; margin:11px 2px 5px; align-items:center;}
+  .pw input{flex:1; min-width:0; border:0; border-bottom:1px dashed var(--rule); background:transparent;
+    font-family:var(--mono); font-size:13px; letter-spacing:5px; color:var(--print);
+    padding:5px 2px; outline:none; text-align:center;}
+  .pw input::placeholder{color:var(--faint); opacity:.7}
+  .pw button{font-family:var(--mono); font-size:10px; letter-spacing:1.5px; padding:6px 13px;
+    border:1px solid var(--print); background:transparent; color:var(--print); cursor:pointer; transition:.15s;}
+  .pw button:hover{background:var(--print); color:var(--paper);}
+
+  /* 모아보기 — 영수증 다발(월) → 흩어보기 */
+  .bshelf{display:flex; gap:44px; justify-content:center; align-items:flex-start; flex-wrap:wrap; padding:40px 10px 16px;}
+  .bundle{position:relative; width:196px; height:160px; cursor:pointer; transition:transform .18s ease;}
+  .bundle:hover{transform:translateY(-6px)}
+  .bundle .sheet{position:absolute; inset:0; background:var(--paper);}
+  .bundle .s1{padding:15px 16px; isolation:isolate;}
+  .bundle .s1:before{content:""; position:absolute; top:9px; left:50%; width:5px; height:5px;
+    border-radius:50%; background:rgba(28,26,23,.55); transform:translateX(-50%);}
+  .pin{position:absolute; left:50%; top:-15px; transform:translateX(-50%); z-index:6; pointer-events:none;}
+  .pin .phead{width:12px; height:12px; border-radius:50%; background:var(--print);
+    box-shadow:0 2px 5px rgba(20,14,8,.4); margin:0 auto;}
+  .pin .pneedle{width:1.7px; height:21px; margin:0 auto;
+    background:linear-gradient(var(--print), rgba(28,26,23,.2));}
+  .band{position:absolute; left:-11px; right:-11px; bottom:24px; height:25px; background:var(--paper);
+    border:1px solid rgba(28,26,23,.22); box-shadow:0 3px 8px rgba(20,14,8,.14);
+    display:flex; align-items:center; justify-content:center;
+    font-size:8.5px; letter-spacing:2.5px; color:var(--faint);}
+  /* 봉인된 달 = 반투명 트레싱지 봉투 (열린 달 = 핀 다발)
+     광택·이음선 없음 — 종이가 겹치는 자리만 한 겹 더 뽀얗게 (청첩장 봉투 질감) */
+  /* overflow:hidden은 안쪽 래퍼(.benv-in)가 맡는다 — .benv 자신은 열어둬야 하프톤 그림자가 밖으로 보인다 */
+  .benv{position:relative; width:186px; height:252px; cursor:pointer;
+    transition:transform .18s ease;
+    background:rgba(255,255,255,.55); border:1px solid rgba(28,26,23,.14);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.4);}
+  .benv-in{position:absolute; inset:0; overflow:hidden;}
+  .benv:hover{transform:translateY(-6px)}
+  .benv .flap{position:absolute; left:-1px; right:-1px; top:-1px; height:64px; z-index:3;
+    background:rgba(255,255,255,.48);
+    clip-path:polygon(0 0, 100% 0, 50% 100%);
+    filter:drop-shadow(0 1px 1px rgba(28,26,23,.07));}
+  .benv .inner{position:absolute; left:16px; right:16px; top:22px; bottom:22px; background:#fff;
+    box-shadow:0 3px 10px rgba(20,14,8,.07); padding:12px 11px; z-index:1;
+    filter:blur(1.8px); opacity:.34;}
+  .benv .inner.ghosted{padding:0;}
+  .benv .inner .gl{height:5px; background:var(--print); opacity:.5; border-radius:1px; margin:6.5px 0;}
+  .benv .label{position:absolute; right:9px; bottom:9px; z-index:5; background:#fff;
+    border:1px solid rgba(28,26,23,.28); box-shadow:0 3px 8px rgba(20,14,8,.12);
+    font-size:8.5px; color:var(--print); padding:5px 9px; letter-spacing:.8px;
+    text-align:right; line-height:1.6;}
+  .benv .label b{display:block; font-size:10.5px; letter-spacing:1px; font-weight:700;}
+  body[data-theme="dark"] .benv{background:rgba(255,255,255,.10);
+    border-color:rgba(255,255,255,.14); box-shadow:0 14px 26px rgba(0,0,0,.5);}
+  body[data-theme="dark"] .benv .flap{background:rgba(255,255,255,.10); filter:none;}
+  body[data-theme="dark"] .benv .inner{opacity:.6;}
+
+  .rgrid{display:flex; flex-wrap:wrap; gap:22px; justify-content:center; max-width:860px; margin:8px auto 0;}
+  .rmini{position:relative; width:178px; background:var(--paper); padding:13px 13px 15px; cursor:pointer;
+    font-size:9.5px; line-height:1.35; transition:transform .15s ease; isolation:isolate;}
+  .rmini:nth-child(3n){transform:rotate(.9deg)} .rmini:nth-child(3n+1){transform:rotate(-.8deg)}
+  .rmini:hover{transform:rotate(0deg) translateY(-4px)}
+  .rmini .t{font-weight:600; font-size:11px; margin:5px 0 4px; text-align:center; line-height:1.3;}
+  .rmini .ex{color:var(--faint); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-align:justify;}
+  body[data-theme="dark"] .rmini, body[data-theme="dark"] .bundle .s1, body[data-theme="dark"] .mappaper{
+    filter:drop-shadow(0 14px 28px rgba(0,0,0,.55));}
+
+  /* 지도 — 다녀온 곳 */
+  .mappaper{position:relative; width:680px; max-width:96%; margin:6px auto 0; background:var(--paper); color:var(--print);
+    font-size:11px; padding:26px 26px 20px; isolation:isolate;}
+  .mappaper svg{width:100%; height:auto; display:block; margin:4px 0;}
+  .mapnode{cursor:pointer;}
+  .mapnode:hover circle{fill:rgba(201,162,39,.22);}
+
+  /* 선물 — 잠긴 구간 */
+  .locked{color:var(--faint);}
+  .locked .mask{letter-spacing:1.5px; opacity:.75;}
+
+  .fine{font-size:8.5px; color:var(--faint); text-align:center; line-height:1.6; letter-spacing:.3px;}
+
+  /* 시간 봉인 (사이트 기본 상태) — 실제 영수증이 초점 나간 것처럼.
+     구성(구역·가로선)은 전부 그대로, 내용만 뭉게지게. 열리는 날이 가까울수록 또렷해진다. */
+  .smudge{filter:blur(calc((1 - var(--dev,.1))*2.1px + 1.2px));
+    opacity:calc(var(--dev,.1)*.45 + .35);
+    pointer-events:none; user-select:none;}
+  /* .printed(썸네일 행)는 현재 실빌드에서 안 쓰이는 경로지만 흐림값은 남겨둔다 — .drawn은
+     아래에서 모자이크로 따로 처리(블러 없음 — 흐림을 얹으면 도트 경계가 뭉개져 모자이크의 결이 죽는다) */
+  .smudge .printed{
+    filter:blur(calc((1 - var(--dev,.1))*5px + 3px));
+    opacity:calc(var(--dev,.1)*.3 + .48);}
+  .smudge-in{display:inline-block; filter:blur(2px); opacity:.5; pointer-events:none;
+    user-select:none; max-width:100%; overflow:hidden; white-space:nowrap; vertical-align:bottom;}
+  .dcombo{display:flex; justify-content:space-between; align-items:baseline; margin:8px 1px 2px;}
+  .dcombo b{font-size:15px; font-weight:500; letter-spacing:1px; font-variant-numeric:tabular-nums;}
+  .dcombo span{font-size:8.5px; color:var(--faint); letter-spacing:.6px;}
+  /* 생일·기념일 특별표시 — 헤더 아래 타이포 밴드 */
+  .anniv{text-align:center; margin:7px 1px 2px; font-size:10px; letter-spacing:3px; color:var(--print);}
+
+  /* 현상 중인 출력사진 — 우윳빛 베일이 경과율만큼 걷힌다 */
+  .print.developing .img{position:relative; overflow:hidden;
+    filter:saturate(calc(var(--dev,.1)*.85 + .15)) contrast(.8);}
+  .print.developing .img:after{content:""; position:absolute; inset:0;
+    background:linear-gradient(175deg, rgba(238,235,228,.96), rgba(213,207,196,.9));
+    opacity:calc(1 - (var(--dev,.1)*.9));}
+  .print.developing .cap{color:#b3ac9f;} /* 상태 라벨은 또렷하게 — 흐리면 의미 없음 */
+
+  /* 기록 좌우 슬라이드 */
+  .snav{position:absolute; top:200px; width:42px; height:42px; border-radius:50%;
+    border:1px solid rgba(128,120,108,.45); background:var(--paper); color:var(--print);
+    font-family:var(--mono); font-size:19px; line-height:1; cursor:pointer; opacity:.6;
+    transition:.15s; z-index:4; filter:drop-shadow(0 3px 8px rgba(20,14,8,.12));}
+  .snav:hover{opacity:1}
+  .snav.l{left:-70px}  .snav.r{right:-70px}
+  .snav[disabled]{opacity:.15; cursor:default}
+  @keyframes slideL{from{opacity:0; transform:translateX(36px)}to{opacity:1; transform:none}}
+  @keyframes slideR{from{opacity:0; transform:translateX(-36px)}to{opacity:1; transform:none}}
+  .scene.sl{animation:slideL .22s ease}
+  .scene.sr{animation:slideR .22s ease}
+
+  /* 좌우의 이웃 영수증 — 컨테이너 자체가 한 장의 종이 (4변 또렷 + 그림자) */
+  /* overflow:hidden은 이웃 종이 미리보기를 자르는 .peek-in이 맡는다 —
+     .peek 자신은 안 잘리게 둬야 하프톤 그림자가 가장자리 밖으로 보인다 */
+  .peek{position:absolute; top:26px; width:372px; height:460px;
+    cursor:pointer; z-index:0; background:var(--paper);
+    transition:transform .15s ease;}
+  .peek.l{left:-242px; transform:rotate(-1.7deg) scale(.9); transform-origin:top right;}
+  .peek.r{right:-242px; transform:rotate(1.5deg) scale(.9); transform-origin:top left;}
+  .peek-in{pointer-events:none; position:absolute; inset:0; overflow:hidden;}
+  .peek-in:after{content:""; position:absolute; inset:0;
+    background:rgba(255,255,255,.48); transition:background .15s ease;}
+  .peek:hover .peek-in:after{background:rgba(255,255,255,.28);}
+  body[data-theme="dark"] .peek{filter:drop-shadow(0 14px 28px rgba(0,0,0,.5));}
+  body[data-theme="dark"] .peek-in:after{background:rgba(21,18,15,.5);}
+  body[data-theme="dark"] .peek:hover .peek-in:after{background:rgba(21,18,15,.32);}
+  .peek .receipt{margin:0; filter:none;}
+  @media (max-width:900px){
+    .peek.l{left:-330px} .peek.r{right:-330px}
+    .snav.l{left:4px} .snav.r{right:4px}
+  }
+
+  /* 관리자 잠금 해제 오버레이 */
+  .ovl{position:fixed; inset:0; background:rgba(255,255,255,.78); z-index:50;
+    display:none; align-items:center; justify-content:center;}
+  body[data-theme="dark"] .ovl{background:rgba(21,18,15,.78)}
+  .ovl.on{display:flex}
+  /* 우상단 전구 토글 (밝게/어둡게) */
+  .themebtn{position:fixed; top:14px; right:16px; z-index:60; width:25px; height:25px; padding:0;
+    border-radius:50%; border:1px solid rgba(128,120,108,.38); background:var(--paper); color:var(--print);
+    cursor:pointer; display:flex; align-items:center; justify-content:center;
+    filter:drop-shadow(0 2px 6px rgba(20,14,8,.1)); transition:.15s;}
+  .themebtn:hover{opacity:.75}
+  body[data-theme="dark"] .themebtn{background:#231d17; color:#e8e3da; border-color:rgba(180,172,160,.35);}
+  /* 주간 좌우 화살표용 좁은 무대 */
+  .scene.wk{width:372px; max-width:96%; margin:0 auto;}
+  .scene.wk .snav.l{left:-56px} .scene.wk .snav.r{right:-56px}
+  @media (max-width:900px){ .scene.wk .snav.l{left:4px} .scene.wk .snav.r{right:4px} }
+  /* 모아보기 — 펼쳐보기(핀터레스트 보드: 열별로 나눠 겹침 없이, 좌우·상하 여백) */
+  /* 흩어보기 = 옆으로 무한히 자라는 보드 — 잡아 끌고, 휠로 흐르고, 가장자리에 두면 흘러간다 */
+  .spread-board{overflow:auto; cursor:grab; user-select:none;
+    width:100%; max-width:min(1132px, calc(100vw - 40px)); margin:0 auto;
+    height:calc(100vh - 205px); min-height:320px;
+    scrollbar-width:none;} /* 무한 보드엔 끝이 없으니 스크롤바도 없다 */
+  .spread-board::-webkit-scrollbar{display:none;}
+  .stage:has(.spread-board){overflow:hidden;} /* 흩어보기에선 바깥 스크롤도 봉인 */
+  .spread-board.drag .sitem{pointer-events:none;} /* 끄는 동안 호버 리프트로 깜빡이지 않게 */
+  .single{min-width:0;}
+  .spread-board:active{cursor:grabbing}
+  .spread{display:flex; gap:13px; align-items:flex-start; width:max-content; padding:14px 12px 26px;}
+  .spread .scol{display:flex; flex-direction:column; gap:11px;}
+  /* 화면 밖 열은 렌더링 생략 — 사본 포함 500장을 다 그리면 끌 때 렉이 걸린다 */
+  .spread.ready .scol{content-visibility:auto; contain-intrinsic-size:auto 150px auto 2600px;}
+  .sp-strip{text-align:center; font-family:var(--mono); font-size:8.5px; letter-spacing:1px; color:var(--faint); margin:2px 0 8px; user-select:none;}
+  .sp-strip .sm{cursor:pointer; padding:2px 1px;}
+  .sp-strip .sm:hover{color:var(--print)}
+  .sp-strip .sl-line{display:inline-block; width:14px; border-top:1px dotted var(--rule); vertical-align:middle; margin:0 4px;}
+  .spread .sitem{cursor:pointer; zoom:.5; transition:transform .15s ease;}
+  .spread .sitem:hover{transform:translateY(-5px)}
+  /* 흩어보기 미니에선 사진이 굵은 망점 인쇄로 — 축소돼도 인쇄물로 읽히게 */
+  .spread .drawn .dfrm::after{background-size:4px 4px; opacity:.34;}
+  .spread .drawn .dimg{filter:grayscale(1) brightness(1.24) contrast(1.18);}
+  /* zoom .5가 블러를 절반으로 깎으므로 봉인 흐림을 2배 보정 — 미니에서도 안 읽히게 (.drawn은 모자이크라 해당 없음) */
+  .spread .smudge{filter:blur(calc((1 - var(--dev,.1))*4.2px + 2.4px));}
+  .spread .smudge .printed{
+    filter:blur(calc((1 - var(--dev,.1))*10px + 6px));}
+
+  /* 오늘의 현상 — 감열 프린터에서 출력되듯 위에서 아래로 인쇄 */
+  @keyframes printin{
+    0%{clip-path:inset(-20px -20px 101% -20px); transform:translateY(-14px);}
+    100%{clip-path:inset(-20px -20px -20px -20px); transform:none;}}
+  .scene.printin > .receipt{animation:printin 1.35s cubic-bezier(.3,.55,.35,1) both;}
+
+  /* 월 레일 — 시간의 색인 (점선 길이 = 그 달의 기록 수) */
+  .single{position:relative;}
+  .mrail{position:absolute; right:0; top:58px; text-align:right; font-family:var(--mono); user-select:none; z-index:5;
+    padding:6px 4px 10px 26px; background:linear-gradient(90deg, transparent, var(--canvas) 34%);}
+  .mrail .yy{font-size:8px; color:var(--faint); letter-spacing:1.5px; margin:9px 0 3px;}
+  .mrail .mm{display:block; font-size:9px; color:var(--faint); padding:2.5px 0; cursor:pointer; letter-spacing:1px; line-height:1;}
+  .mrail .mm:hover{color:var(--print)}
+  .mrail .mm.on{color:var(--print); font-weight:700;}
+  .mrail .mm .bar{display:inline-block; height:0; border-top:1px dotted var(--rule); vertical-align:middle; margin-right:5px;}
+  .mrail .mm.on .bar{border-top-style:solid; border-top-color:var(--print);}
+  @media (max-width:1080px){ .mrail{display:none} }
+  .toggle-w b{border-bottom:1px solid var(--print); font-weight:400;}
+  /* 사진 = 영수증에 프린트된 흑백 이미지(감열 하프톤) — 일기 아래에 작게 */
+  .printed{display:flex; gap:9px; flex-wrap:wrap; justify-content:center; margin:7px 0 3px;}
+  .printed .pph{width:116px; cursor:pointer;}
+  .printed .pimg{height:74px; position:relative; overflow:hidden; background-size:cover; background-position:center;
+    filter:grayscale(1) contrast(1.4) brightness(1.02); border:1px solid rgba(28,26,23,.3);}
+  .printed .pimg:after{content:''; position:absolute; inset:0;
+    background-image:radial-gradient(circle, rgba(0,0,0,.7) .6px, transparent 1px);
+    background-size:3px 3px; mix-blend-mode:multiply; opacity:.42;}
+  .printed .pph:hover .pimg{filter:grayscale(1) contrast(1.08) brightness(1.08);}
+  .printed .pcap{font-size:8px; color:var(--faint); text-align:center; margin-top:3px; letter-spacing:.2px;}
+  body[data-theme="dark"] .printed .pimg{border-color:rgba(255,255,255,.22);}
+  /* 일기 문구 사이에 인쇄된 그림 — 실사진 흑백 고대비 raw 톤 (감열 인쇄 느낌) */
+  .drawn{margin:11px 0 12px; cursor:pointer;}
+  /* .dfrm = 자르는 창(고정 크기·overflow:hidden). .dimg(실제 <img>)는 그 안을 채우기만 —
+     사진 자체를 확대/축소해도(모자이크) 창 밖으로 안 새게 역할을 분리해뒀다. */
+  .drawn .dfrm{display:block; width:100%; height:208px; position:relative; overflow:hidden;}
+  /* 테두리 없음 · 밝은 부분은 multiply로 종이에 녹아듦(배경 없는 인쇄물처럼) · 밝고 옅게 */
+  .drawn .dimg{width:100%; height:100%; object-fit:cover; display:block;
+    background-size:cover; background-position:center;
+    filter:grayscale(1) brightness(1.36) contrast(1.08); mix-blend-mode:multiply;}
+  .drawn .dfrm:after{content:''; position:absolute; inset:0; pointer-events:none;
+    background-image:radial-gradient(circle, rgba(0,0,0,.55) .4px, transparent .85px);
+    background-size:2px 2px; mix-blend-mode:multiply; opacity:.2;}
+  .drawn:hover .dimg{filter:grayscale(1) brightness(1.3) contrast(1.13);}
+  .drawn .dcap{font-size:8px; color:var(--faint); text-align:center; margin-top:3px; letter-spacing:.2px;}
+  body[data-theme="dark"] .drawn .dimg{mix-blend-mode:normal; filter:grayscale(1) brightness(.95) contrast(1.12);}
+  /* 봉인 — CSS 하프톤: 원래 사진 데이터에서 CSS만으로 정석 망점을 만든다.
+     원리 = 회색조 + 사전 블러(형체는 여기서 융해되지만 출력은 또렷한 점이라 뿌옇지 않음) 위에
+     규칙적인 도트 격자(5px)를 screen 블렌드로 얹고, 컨테이너 contrast 한 번으로 이진화 —
+     어두운 곳일수록 점이 굵어지는 신문 망점. contrast는 컨테이너에만 한 번(이미지에 또 걸면
+     블렌드 결과를 재차 밀어붙여 점 경계가 깨지고 테두리가 생긴다 — 실제로 겪은 버그). */
+  .sealph, .smudge .drawn{opacity:calc(var(--dev,.1)*.25 + .62); pointer-events:none; user-select:none;}
+  .sealph .dcap, .smudge .drawn .dcap{opacity:0;}
+  .sealph .dfrm, .smudge .dfrm{background:#fff; filter:contrast(34); isolation:isolate;}
+  .sealph .dfrm .dimg, .smudge .dfrm .dimg{
+    filter:grayscale(1) blur(4px) brightness(1.06); mix-blend-mode:normal; transform:scale(1.08);}
+  /* 다크 모드 기본 사진 규칙(body[data-theme] .drawn .dimg, 특정도 0,3,1)이 봉인 규칙(0,3,0)을
+     이겨서 블러가 빠지면 원본 디테일이 그대로 망점에 찍힌다 — 명시적으로 다시 이겨준다 */
+  body[data-theme="dark"] .sealph .dfrm .dimg, body[data-theme="dark"] .smudge .dfrm .dimg{
+    filter:grayscale(1) blur(4px) brightness(1.06); mix-blend-mode:normal;}
+  .sealph .dfrm::after, .smudge .dfrm::after,
+  .spread .sealph .dfrm::after, .spread .smudge .dfrm::after{ /* .spread 텍스처 규칙(0,3,1)보다 우선 */
+    content:''; position:absolute; inset:0; pointer-events:none; opacity:1;
+    background-image:radial-gradient(circle, #000 .45px, #fff 2.45px);
+    background-size:5px 5px; mix-blend-mode:screen;}
+  /* 다크 모드에서도 영수증 종이는 흰색 — 반전 없이 라이트와 동일한 망점(간극 0) */
+  body[data-theme="dark"] .sealph .dfrm, body[data-theme="dark"] .smudge .dfrm{
+    filter:contrast(34); background:#fff;}
+  /* 컬러 사진 라이트박스 = 폴라로이드(보존) */
+  .lbwrap{display:flex; gap:22px; flex-wrap:wrap; justify-content:center; align-items:flex-start; max-width:92vw;}
+  .lbprint{position:static; width:250px;}
+  .lbprint .img{height:210px;}
+
+  /* ── 잠금 화면 ── */
+  .gate{position:fixed; inset:0; z-index:100; display:flex; align-items:center; justify-content:center;
+    padding:24px; background:var(--canvas); font-family:var(--mono);}
+  .gate-receipt{position:relative; width:100%; max-width:300px; background:var(--paper); color:var(--print);
+    font-size:11.5px; line-height:1.34; letter-spacing:-.1px; padding:26px 24px 24px;}
+  /* 하프톤 그림자 — design/desktop-mockup-v2.html .receipt::after와 동일 기법(부드러운 덩어리+도트 마스크+clip-path 구멍) */
+  .gate-receipt::after{content:""; position:absolute; pointer-events:none;
+    top:-1px; left:-1px; right:-10px; bottom:-12px;
+    background:radial-gradient(ellipse 88% 82% at 76% 74%,
+      rgba(20,14,8,.32), rgba(20,14,8,.15) 46%, rgba(20,14,8,.05) 70%, rgba(20,14,8,0) 88%);
+    -webkit-mask-image:radial-gradient(circle, #000 .55px, transparent .9px);
+    -webkit-mask-size:2.6px 2.6px;
+    mask-image:radial-gradient(circle, #000 .55px, transparent .9px);
+    mask-size:2.6px 2.6px;
+    clip-path:polygon(evenodd, 0 0, 100% 0, 100% 100%, 0 100%,
+      1px 1px, calc(100% - 10px) 1px, calc(100% - 10px) calc(100% - 12px), 1px calc(100% - 12px));}
+  body[data-theme="dark"] .gate-receipt{filter:drop-shadow(0 16px 32px rgba(0,0,0,.55));}
+  body[data-theme="dark"] .gate-receipt::after{display:none;}
+  .gate .sec{margin:0 0 4px;}
+  .pw{display:flex; flex-direction:column; gap:12px; margin:16px 2px 10px;}
+  #gate-input{width:100%; border:0; border-bottom:1px dashed var(--rule); background:transparent;
+    font-family:var(--mono); font-size:14px; letter-spacing:8px; text-align:center; text-indent:8px;
+    color:var(--print); padding:10px 2px; outline:none; transition:border-bottom-color .15s;}
+  #gate-input::placeholder{color:var(--faint); opacity:.7; letter-spacing:6px;}
+  #gate-input:focus{border-bottom-style:solid; border-bottom-color:var(--print);}
+  #gate-btn{width:100%; font-family:var(--mono); font-size:10.5px; letter-spacing:2px; padding:8px;
+    border:1px solid var(--print); background:transparent; color:var(--print); cursor:pointer; transition:.15s;}
+  #gate-btn:hover{background:var(--print); color:var(--paper);}
+  .gate-error{color:#b24a32; font-size:10px; letter-spacing:.3px; text-align:center; margin:9px 0 0;}
+
+  /* ── 사진: 부드러운 흑백 인쇄 · 원본 구도(크롭X) · 테두리 없음 ── */
+  .drawn{position:relative; margin:13px 0; cursor:pointer; line-height:0;}
+  .drawn .dimg{width:100%; height:210px; object-fit:cover; display:block; background:none; border:0;
+    filter:grayscale(1) brightness(1.26) contrast(1.04); mix-blend-mode:multiply;}
+  .mapnode text{cursor:pointer; transition:opacity .15s;}
+  .mapnode:hover text{opacity:.55;}
+
+  /* ── 사진 로딩 — 로딩 전엔 은은한 망점 네모, 로딩되면 스르륵 (깜빡임 방지) ── */
+  [data-ph]:not(.phloaded){background-color:rgba(28,26,23,.045) !important;
+    background-image:radial-gradient(circle, rgba(28,26,23,.12) .5px, transparent .9px) !important;
+    background-size:3px 3px !important;}
+  body[data-theme="dark"] [data-ph]:not(.phloaded){background-color:rgba(255,255,255,.05) !important;
+    background-image:radial-gradient(circle, rgba(255,255,255,.10) .5px, transparent .9px) !important;}
+  [data-ph].phloaded{animation:phin .45s ease;}
+  @keyframes phin{from{opacity:0}to{opacity:1}}
+  .drawn .dimg:after{display:none;}
+  body[data-theme="dark"] .drawn .dimg{mix-blend-mode:normal; filter:grayscale(1) brightness(.95) contrast(1.12);}
+  .drawn:hover .dimg{filter:grayscale(1) brightness(1.2) contrast(1.08);}
+  .drawn::after{content:""; position:absolute; inset:0; pointer-events:none;
+    background-image:radial-gradient(circle, rgba(0,0,0,.5) .4px, transparent .85px);
+    background-size:2px 2px; mix-blend-mode:multiply; opacity:.15;}
+  body[data-theme="dark"] .drawn::after{opacity:.28;}
+  .drawn .dcap{font-size:8.5px; color:var(--faint); text-align:center; margin-top:5px; letter-spacing:.3px; line-height:1.4;}
+
+  /* ── 바코드 = 날짜+일련번호 인코딩 · 좌우로 꽉 참 · 아래 숫자만 ── */
+  .bcwrap{text-align:center; margin:12px 0 2px; cursor:pointer;}
+  .bcwrap .bc-code{display:block; width:100%; height:32px;}
+  .bcwrap:hover{opacity:.8;}
+  .receipt .bc-num{text-align:center; font-size:9px; letter-spacing:3px; color:#1c1a17; font-weight:500; margin:1px 0 2px; padding-left:3px;}
+  /* 이전/다음 이동 = 회색 */
+  .snav{color:var(--faint);}
+  .receipt .r-foot{color:var(--faint);}
+</style>
+</head>
+<body data-theme="light">
+
+  <!-- 비밀번호 잠금 화면 (영수증) -->
+  <div id="gate" class="gate">
+    <button type="button" id="gate-theme" class="themebtn" aria-label="밝게 / 어둡게 전환"></button>
+    <div class="gate-receipt">
+      <div class="r-center">
+        <div class="r-wordmark">기록</div>
+        <div class="r-tag">PRIVATE ARCHIVE — 월하</div>
+      </div>
+      <div class="rule solid"></div>
+      <div class="sec">비밀번호 — PASSWORD</div>
+      <form id="gate-form" class="pw" autocomplete="off">
+        <input id="gate-input" type="password" inputmode="text" placeholder="········" aria-label="비밀번호" />
+        <button type="submit" id="gate-btn">열기</button>
+      </form>
+      <p id="gate-error" class="gate-error" hidden>비밀번호가 맞지 않아요</p>
+      <div class="rule"></div>
+      <div class="barcode"></div>
+      <div class="bc-num">2 0 2 6 · 記 錄</div>
+    </div>
+  </div>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><!-- 감열 인쇄 톤: 명암 레벨 축소(포스터화) -->
+  <filter id="hlf4"><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncR type="discrete" tableValues="0 .34 .67 1"/><feFuncG type="discrete" tableValues="0 .34 .67 1"/><feFuncB type="discrete" tableValues="0 .34 .67 1"/></feComponentTransfer></filter>
+  <filter id="hlf5"><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncR type="discrete" tableValues="0 .25 .5 .75 1"/><feFuncG type="discrete" tableValues="0 .25 .5 .75 1"/><feFuncB type="discrete" tableValues="0 .25 .5 .75 1"/></feComponentTransfer></filter>
+  <filter id="hlf8"><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncR type="discrete" tableValues=".0625 .1875 .3125 .4375 .5625 .6875 .8125 .9375"/><feFuncG type="discrete" tableValues=".0625 .1875 .3125 .4375 .5625 .6875 .8125 .9375"/><feFuncB type="discrete" tableValues=".0625 .1875 .3125 .4375 .5625 .6875 .8125 .9375"/></feComponentTransfer></filter>
+</svg>
+  <div class="bar">
+    <div class="seg" id="tabs"></div>
+    <span class="gap"></span>
+    <div class="seg" id="adm"></div>
+  </div>
+  <button id="themebtn" class="themebtn" aria-label="밝게 / 어둡게 전환"></button>
+  <div class="stage" id="vp"></div>
+  <div class="ovl" id="ovl"></div>
+  <div class="ovl" id="lb"></div>
+
+<script>
+(function(){
+  var screens=[["single","기록"],["bundles","모아보기"],["map","지도"],["weekly","주간"],["index","찾아보기"]];
+  var state={s:"single", theme:(function(){try{var t=localStorage.getItem("theme");if(t)return t;}catch(e){}return document.body.dataset.theme==="dark"?"dark":"light";})()};
+  var bundleMonth=null, admin=false, slideDir=0, spread=false;
+
+  // 시간 봉인 — 사이트의 기본 상태. 기록 후 N개월이 지나야 또렷해진다(모자이크 → 인쇄).
+  var TODAY=(function(){try{return new Intl.DateTimeFormat("sv-SE",{timeZone:"Asia/Seoul"}).format(new Date()).replace(/-/g,".");}catch(e){return new Date().toISOString().slice(0,10).replace(/-/g,".");}})();
+  function addMonths(d,n){ var p=d.split('.').map(Number); p[1]+=n;
+    while(p[1]>12){p[1]-=12; p[0]++;}
+    return p[0]+'.'+('0'+p[1]).slice(-2)+'.'+('0'+p[2]).slice(-2); }
+  function isOpen(e){ return !!(e.unlock && e.unlock<=TODAY); }
+  function opensAt(e){ return e.unlock || "∞"; }
+
+  function dots(n){var s='';for(var i=0;i<5;i++)s+=(i<n?'●':'○');return s;}
+  function stars(){return '<div class="stars">**************************************</div>';}
+  function kw(t){return '<span class="kw" onclick="event.stopPropagation();GO(\'index\')">'+t+'</span>';}
+  function _permalink(no){return location.origin+location.pathname+'?e='+encodeURIComponent(no);}
+  function barcode(e){var d8=String(e.date).replace(/[-.]/g,''),s4=('000'+(e.seq||0)).slice(-4),hh=2166136261,_i;for(_i=0;_i<e.no.length;_i++){hh^=e.no.charCodeAt(_i);hh=(hh*16777619)>>>0;}var serial=d8+s4+('000000'+(hh>>>0).toString(16).toUpperCase()).slice(-6);return '<div class="bcwrap" title="'+_permalink(e.no)+' (클릭하면 링크 복사)" onclick="event.stopPropagation();COPYLINK(this,\''+e.no+'\')"><svg class="bc-code" data-code="'+_permalink(e.no)+'"></svg><div class="bc-num">'+serial+'</div></div>';}
+  window.COPYLINK=function(el,no){var url=_permalink(no);var done=function(){var n=el.querySelector('.bc-num');if(n){var o=n.getAttribute('data-num')||n.textContent;if(!n.getAttribute('data-num'))n.setAttribute('data-num',o);n.textContent='링크 복사됨 ✓';setTimeout(function(){n.textContent=n.getAttribute('data-num');},1400);}};try{navigator.clipboard.writeText(url).then(done,done);}catch(x){done();}};
+  var ANNIV="2026.06.12"; // 사귄 날 — 그날이 1일째
+  function loveDday(dateStr){ if(!dateStr) return '';
+    var diff=Math.floor(dnum(dateStr)-dnum(ANNIV));
+    var n=diff>=0? diff+1 : diff;   // 사귄 날=1일째, 그 전은 마이너스(며칠 전)
+    return '<div class="r-tag" style="margin-top:1px">'+n+'일째</div>'; }
+  function head(sub, dateStr, title, subline){
+    var sl=(subline===undefined)?'공개하지 않는 기록 — 월하':subline;
+    return '<div class="r-center"><div class="r-wordmark" onclick="SECRETTAP()" style="cursor:default; user-select:none">'+(title||'기록')+'</div>'
+      +(sl?'<div class="r-tag">'+sl+'</div>':'')+loveDday(dateStr)+'</div>'
+      +(sub?'<div class="r-meta"><span>'+sub[0]+'</span><span>'+sub[1]+'</span></div>':'');
+  }
+  // 생일·기념일 = 도장이 아니라 헤더 특별표시 (달력에서 자동, 장식 오브젝트 아닌 타이포 밴드)
+  var BIRTHDAYS={ "05-12":"월하 생일", "07-28":"유빈 생일" };
+  var ANNIVS={ "06-12":"사귄 날" };  // 사귄 해 당일은 N일째 카운터가 담당, 이듬해부터 n주년
+  function annivMark(e){
+    var mmdd=e.date.slice(5).replace('.','-'), yr=parseInt(e.date.slice(0,4),10), label=null;
+    if(BIRTHDAYS[mmdd]) label=BIRTHDAYS[mmdd];
+    else if(ANNIVS[mmdd] && yr>2026) label=ANNIVS[mmdd]+' '+(yr-2026)+'주년';
+    if(!label) return '';
+    return '<div class="anniv">＊　'+label+'　＊</div>';
+  }
+  // 오늘의 현상 — 지난 방문 이후 새로 열린 기록이 있으면 거기서 시작 (유빈의 아침)
+  var freshNo=null, freshAnim=false, freshSet={};
+  function freshMark(e){ return e.no===freshNo? '<div class="anniv">＊　오늘 현상　＊</div>':''; }
+  function landing(){
+    if(!entries.length) return;
+    var seen='0000.00.00';
+    try{ seen=localStorage.getItem('lastDev')||seen; }catch(err){}
+    var fresh=entries.filter(function(e){ var o=opensAt(e); return o && o!=='∞' && o<=TODAY && o>seen; });
+    if(!fresh.length) return;
+    fresh.sort(function(a,b){ return opensAt(b).localeCompare(opensAt(a)) || b.date.localeCompare(a.date); });
+    fresh.forEach(function(e){ freshSet[e.no]=1; });
+    current=fresh[0].no; freshNo=fresh[0].no; freshAnim=true;
+    var mx=fresh.reduce(function(m,e){ return opensAt(e)>m? opensAt(e):m; }, seen);
+    try{ localStorage.setItem('lastDev',mx); }catch(err){}
+  }
+  function asciiTag(){
+    return ""
++"  ___   ___   ___ \n"
++" / __| / _ \\ |   \\\n"
++" \\__ \\| (_) || |) |\n"
++" |___/ \\___/ |___/";
+  }
+
+  // 하루 = 영수증 한 장. 실제 복기 타임라인(_review/analysis/timeline.md) 기반 참고판 —
+  // 마음 문구는 임시 초안, 최종 문구·선별은 월하가.
+  var entries=[];
+  // 요일은 날짜에서 자동 계산
+  entries.forEach(function(e){ var p=e.date.split('.').map(Number);
+    e.wd=['日','月','火','水','木','金','土'][new Date(Date.UTC(p[0],p[1]-1,p[2])).getUTCDay()]; });
+  // 제목은 선택 — 없으면 목록에선 본문 첫 구절로
+  function tit(e){ return e.t? e.t : (e.note? e.note.slice(0,16)+'…' : '(일기 없음)'); }
+
+  // 이동 경로 미니맵 (그날 다닌 곳)
+  function pathmap(places){
+    var W=300,H=78,pad=30,n=places.length;
+    if(n<1) return '';
+    var xs=[],ys=[];
+    for(var i=0;i<n;i++){
+      xs.push(n===1? W/2 : pad + i*((W-2*pad)/(n-1)));
+      ys.push(n===1? 38 : 38 + (i%2? -11:11));
+    }
+    var line='';
+    if(n>1){ var d='M'; for(var j=0;j<n;j++){ d+=(j?' L':'')+xs[j].toFixed(1)+','+ys[j]; }
+      line='<path d="'+d+'" fill="none" stroke="var(--print)" stroke-width="1" stroke-dasharray="2 3"/>'; }
+    var dots='';
+    for(var k=0;k<n;k++){
+      var lyOff=(k%2? -8:16);
+      dots+='<circle cx="'+xs[k].toFixed(1)+'" cy="'+ys[k]+'" r="3.4" fill="var(--paper)" stroke="var(--print)" stroke-width="1.3"/>'
+        +'<text x="'+xs[k].toFixed(1)+'" y="'+(ys[k]+lyOff)+'" text-anchor="middle" font-family="var(--mono)" font-size="8.2" fill="var(--print)">'+places[k]+'</text>';
+    }
+    return '<div class="map"><svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="xMidYMid meet">'+line+dots+'</svg></div>';
+  }
+
+  // 그날의 도장 (활동에서 자동으로 찍힘 — 피크민 꽃/스티커 대응)
+  // 날씨/습도 = 인라인 SVG 아이콘 (모노, currentColor — 글리프 깨짐·정렬 문제 해결)
+  function icoWrap(svg){ return '<span style="display:inline-block;width:12px;height:12px;vertical-align:-2px;line-height:0">'+svg+'</span>'; }
+  function wxSvg(w){ if(!w) return '';
+    var a='<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">';
+    if(/맑/.test(w)) return icoWrap(a+'<circle cx="12" cy="12" r="4"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.6 1.6M16.9 16.9l1.6 1.6M18.6 5.4l-1.6 1.6M6.9 16.9l-1.6 1.6"/></svg>');
+    if(/구름|부분|한때/.test(w)) return icoWrap(a+'<circle cx="8.5" cy="8" r="3"/><path d="M7.5 18.5h9a3.4 3.4 0 0 0 .3-6.78A4.6 4.6 0 0 0 8 11 3 3 0 0 0 7.5 18.5z"/></svg>');
+    if(/흐/.test(w)) return icoWrap(a+'<path d="M7 17.5h10a3.7 3.7 0 0 0 .3-7.38A5 5 0 0 0 7.6 10 3.2 3.2 0 0 0 7 17.5z"/></svg>');
+    if(/비|소나기/.test(w)) return icoWrap(a+'<path d="M7 14h10a3.5 3.5 0 0 0 .3-6.98A4.8 4.8 0 0 0 7.6 6.5 3.1 3.1 0 0 0 7 14z"/><path d="M8.5 17l-1 2.5M12 17l-1 2.5M15.5 17l-1 2.5"/></svg>');
+    if(/눈/.test(w)) return icoWrap(a+'<path d="M12 4v16M5 8l14 8M19 8L5 16"/></svg>');
+    if(/천둥|뇌우/.test(w)) return icoWrap(a+'<path d="M7 13.5h10a3.5 3.5 0 0 0 .3-6.98A4.8 4.8 0 0 0 7.6 6 3.1 3.1 0 0 0 7 13.5z"/><path d="M12.5 14l-2.4 3.8h2.6L11 21.5"/></svg>');
+    return ''; }
+  function humSvg(){ return icoWrap('<svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M12 3.5s5 5.9 5 9.4a5 5 0 0 1-10 0C7 9.4 12 3.5 12 3.5z"/></svg>'); }
+  function bulbSvg(on){
+    return '<svg viewBox="0 0 24 24" width="13" height="13" fill="'+(on?'currentColor':'none')+'" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">'
+      +'<path d="M8.5 15.2a6 6 0 1 1 7 0c-.75.6-1 1.2-1 2.3h-5c0-1.1-.25-1.7-1-2.3z"/>'
+      +'<path d="M9.5 20h5M10.5 22h3" fill="none"/></svg>';
+  }
+  // 헤더 둘째 줄 — 그날의 장소 · 날씨아이콘 기온 · 습도아이콘 습도 (실빌드: GPS 역지오코딩 + 날씨 소스로 자동)
+  function geoLine(e){
+    var geo=e.geo || (e.pl && e.pl!=='—' && e.pl!=='카톡' ? e.pl : '');
+    var parts=[];
+    if(e.temp) parts.push((wxSvg(e.sky)? wxSvg(e.sky)+' ' : '')+e.temp);
+    else if(e.wx) parts.push(e.wx);
+    if(e.hum) parts.push(humSvg()+' '+e.hum);
+    return [geo, parts.join(' · ')].filter(Boolean).join(' · ');
+  }
+  // 도장 기준 (2026-07-10 확정):
+  //  · 도장 = "무엇을 한 날인가"의 활동 유형(닫힌 세트 9종) / 키워드 = 고유명·사건·테마 — 역할 분리.
+  //  · 파생 소스는 '한 일' 로그 + 데이터 필드(걸음)뿐 — 일기 본문은 감상이라 보지 않는다(언급 오발 방지).
+  //  · 이동·사진·기록(메타)은 영수증에서 이미 보이는 정보라 도장에서 제외.
+  //  · 최대 5개, 넘치면 드문 도장 우선. nostamp:[…]로 수동 억제 가능(최종 확정은 사람).
+  //  · 시안은 정규식이지만 실빌드는 장소 카테고리(POI)·걸음 데이터로 대체.
+  var STAMP_RULES=[
+    ["♪","공연", /공연|연주회|음악회|콘서트/],
+    ["◫","전시", /전시|미술관|박물관|갤러리|건축전/],
+    ["▤","책",   /(?<!산)책|서점|교보|유어마인드|디자인랩/],
+    ["▸","영화", /영화|씨네큐브|극장|상영/],
+    ["♩","연습", /연습|리허설|합주/],
+    ["◍","카페", /카페|커피|스타벅스|도넛|탐석과 사랑|한시십일분|2층 사무실|베란다|마호가니/],
+    ["Ψ","식사", /국수|비빔밥|수제비|라자|버거|피자|맥도날드|푸드트럭|서울집시|저녁|점심/],
+    ["⊔","술",  /맥주|하이볼|와인|소주|막걸리|야키토리|이자카야|뒤풀이|회식|칵테일/],
+    ["▢","쇼핑", /쇼핑|편집샵|마트|다이어리|양말|문구점|파피어프로스트/],
+    ["◇","선물", /선물|해피밀/],
+    ["‹","작업", /작업|코덱스|커밋|과제|마감|크리틱|졸준위/]  // 실빌드: 작업 폴더 git 커밋으로 자동
+  ];
+  var STEP_STAMP=12000;   // ∿걸음 — 12,000보 이상 걸은 날
+  var TRIP_KM=20;         // ✈여행 — 이동거리 20km↑ 또는 서울 밖 지역 (실빌드: 사진 GPS·이동거리)
+  var TRIP_RE=/부천|고양|강릉|일산|수원|인천|안산|춘천|파주|속초|경주/;
+  function rawStamps(e){
+    var logTxt=(e.log||[]).map(function(l){return l[0];}).join(' ');
+    var region=logTxt+' '+((e.places||[]).join(' '))+' '+(e.pl||'');
+    var s=[];
+    STAMP_RULES.forEach(function(r){ if(r[2].test(logTxt)) s.push([r[0],r[1]]); });
+    var km=e.dist? parseFloat(String(e.dist)) : 0;
+    if(km>=TRIP_KM || TRIP_RE.test(region)) s.push(["✈","여행"]);
+    if(e.steps && parseInt(String(e.steps).replace(/,/g,''),10)>=STEP_STAMP) s.push(["∿","걸음"]);
+    if(e.nostamp) s=s.filter(function(x){return e.nostamp.indexOf(x[1])<0;});
+    return s;
+  }
+  var stampFreq=null;
+  function deriveStamps(e){
+    var s=rawStamps(e);
+    if(s.length>5){ // 드문 도장 우선 — 매일 찍히는 것부터 탈락
+      if(!stampFreq){ stampFreq={};
+        entries.forEach(function(o){ rawStamps(o).forEach(function(x){ stampFreq[x[1]]=(stampFreq[x[1]]||0)+1; }); }); }
+      s=s.slice().sort(function(a,b){ return (stampFreq[a[1]]||0)-(stampFreq[b[1]]||0); }).slice(0,5);
+      var order=STAMP_RULES.map(function(r){return r[1];}).concat(["여행","걸음"]);
+      s.sort(function(a,b){ return order.indexOf(a[1])-order.indexOf(b[1]); });
+    }
+    return s;
+  }
+  // 도장 아이콘 = 인라인 SVG (모노, currentColor, 원 안에 중앙정렬). 텍스트 글리프는 정렬·깨짐 문제로 폐기.
+  var STAMP_ICON={
+    "공연":'<path d="M9 18V6l9-2v10"/><circle cx="7" cy="18" r="2"/><circle cx="16" cy="14" r="2"/>',
+    "전시":'<rect x="3" y="4.5" width="18" height="15" rx="1"/><path d="M3 15l5-5 4 4 3-3 6 6"/><circle cx="8.5" cy="9" r="1.2"/>',
+    "책":'<path d="M12 5.5C10.4 4.5 8 4 6 4c-1.3 0-2.4.2-3 .5v13c.6-.3 1.7-.5 3-.5 2 0 4.4.5 6 1.5M12 5.5C13.6 4.5 16 4 18 4c1.3 0 2.4.2 3 .5v13c-.6-.3-1.7-.5-3-.5-2 0-4.4.5-6 1.5M12 5.5v13"/>',
+    "영화":'<rect x="3" y="8.5" width="18" height="11" rx="1"/><path d="M3 8.5l3-4 3 4M9 8.5l3-4 3 4M15 8.5l3-4 3 4"/>',
+    "연습":'<path d="M9 4.5h6l3 15H6z"/><path d="M12 19.5V8.5M12 8.5l4-1.8"/>',
+    "카페":'<path d="M4.5 9.5h12v4a5 5 0 0 1-5 5H9.5a5 5 0 0 1-5-5z"/><path d="M16.5 10.5H19a2 2 0 0 1 0 4h-2.5"/><path d="M7.5 3.2c0 1-1 1.4-1 2.4M11 3.2c0 1-1 1.4-1 2.4"/>',
+    "식사":'<path d="M6 3v4M8.5 3v4M6 7a1.25 1.25 0 0 0 2.5 0M7.25 7v14"/><path d="M15.5 3.5c-1.6 0-2.6 1.6-2.6 3.6s1 3 2.6 3 2.6-1 2.6-3-1-3.6-2.6-3.6zM15.5 10.5V21"/>',
+    "술":'<path d="M7.5 3.5h9l-1.2 6.5a3.4 3.4 0 0 1-6.6 0z"/><path d="M12 13.5V20M8.5 20h7"/>',
+    "걸음":'<ellipse cx="8.8" cy="7.6" rx="2.2" ry="3"/><path d="M6.6 10.9c0 1.3 1 1.9 2.2 1.9s2.2-.6 2.2-1.9"/><ellipse cx="15.2" cy="12" rx="2.2" ry="3"/><path d="M13 15.3c0 1.3 1 1.9 2.2 1.9s2.2-.6 2.2-1.9"/>',
+    "쇼핑":'<path d="M6 8h12l-1 12H7z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/>',
+    "선물":'<rect x="4.5" y="9.5" width="15" height="10.5" rx="1"/><path d="M4.5 13.5h15M12 9.5V20"/><path d="M12 9.5C10.3 9.5 8.5 8.8 8.5 7.2 8.5 5.9 10 5.7 12 9.5zM12 9.5c1.7 0 3.5-.7 3.5-2.3 0-1.3-1.5-1.5-3.5 2.3z"/>',
+    "작업":'<path d="M9 8l-4 4 4 4M15 8l4 4-4 4M13.2 6l-2.4 12"/>',
+    "여행":'<rect x="6.5" y="4" width="11" height="12.5" rx="3"/><path d="M6.5 11.5h11M9.5 19.5l-2 2M14.5 19.5l2 2"/><circle cx="9.5" cy="14" r="1"/><circle cx="14.5" cy="14" r="1"/>'
+  };
+  function stampSvg(label){
+    var inner=STAMP_ICON[label]||'<circle cx="12" cy="12" r="6"/>';
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">'+inner+'</svg>';
+  }
+  function stampsRow(e){
+    var s=deriveStamps(e); if(!s.length) return '';
+    return '<div class="stamps">'+s.map(function(x){
+      return '<div class="stamp"><div class="ic">'+stampSvg(x[1])+'</div><div class="lb">'+x[1]+'</div></div>';
+    }).join('')+'</div>';
+  }
+
+  function receipt(e, sealed){
+    var d=sealed? devInfo(e):null;
+    // 봉인 시: 구성은 그대로, 내용 덩어리만 흐림(가로선·헤더는 또렷)
+    function C(html){ return sealed? '<div class="smudge">'+html+'</div>' : html; }
+    var idx=entries.indexOf(e), pv=entries[idx+1], nx=entries[idx-1];
+    var nav=(pv?'<span style="cursor:pointer" onclick="GO(\'single\',\''+pv.no+'\')">← '+pv.no+'</span>':'<span style="color:var(--faint)">시작</span>')
+      +'&ensp;·&ensp;'
+      +(nx?'<span style="cursor:pointer" onclick="GO(\'single\',\''+nx.no+'\')">'+nx.no+' →</span>':'<span style="color:var(--faint)">최신</span>');
+    var topN=0;
+    var logHtml=e.log.map(function(l){
+      if(l[2]==='sub'){
+        return '<div class="li"><span class="n"></span>'
+          +'<span style="flex:1; padding-left:16px; color:var(--faint)">└ '+l[0]+'</span>'
+          +(l[1]?'<span class="sub">'+l[1]+'</span>':'')+'</div>';
+      }
+      topN++; var n=('0'+topN).slice(-2);
+      return '<div class="li"><span class="n">'+n+'.</span><span style="flex:1">'+l[0]+'</span>'
+        +(l[1]?'<span class="sub">'+l[1]+'</span>':'')+'</div>';
+    }).join('');
+    var kwHtml='<div class="r-center" style="line-height:1.9">'+e.kws.map(kw).join('  ')+'</div>';
+    var dist=e.dist?(' · '+e.dist+' · '+e.steps+'걸음'):'';
+    // 없는 구역은 인쇄하지 않는다 — 쓴 만큼만 길어지는 영수증
+    var moveSec=(e.places&&e.places.length>1)
+      ? '<div class="rule"></div>'
+        + C('<div class="sec" style="color:var(--faint)">이동 — WALKED'+dist+'</div>'+pathmap(e.places))
+      : '';
+    var st=stampsRow(e);
+    var stampSec=st? '<div class="rule"></div>'
+        + C('<div class="sec" style="color:var(--faint)">도장 — STAMPS</div>'+st) : '';
+    var kwSec=e.kws.length? '<div class="rule"></div>'
+        + C('<div class="sec" style="color:var(--faint)">키워드 — KEYWORDS</div>'+kwHtml) : '';
+    return '<div class="receipt"'+(sealed?' style="--dev:'+d.frac.toFixed(2)+'"':'')+'>'
+      + head([e.date+' '+e.wd, sealed?'NO. '+e.no:e.time], e.date, sealed?'':e.t, sealed?'':geoLine(e))
+      + '<div class="rule solid"></div>'
+      // 생일·기념일 특별표시 — 달력 자동, 헤더 정보라 봉인 상태에서도 또렷 (N일째 카운터와 동일 취급)
+      + annivMark(e)
+      + freshMark(e)
+      // 봉인 중이면 공개 D-데이가 맨 위에
+      + (sealed? '<div class="dcombo" style="margin:7px 1px 5px"><b>D-'+d.left+'</b><span>'+opensAt(e)+' 열림 · 현상 '+Math.round(d.frac*100)+'%</span></div><div class="rule"></div>' : '')
+      // ── 자동 기록 영역 ──
+      + moveSec
+      + '<div class="rule"></div>'
+      + C('<div class="sec" style="color:var(--faint)">한 일 — LOG</div>')
+      + '<div class="rule"></div>'
+      + C(logHtml)
+      + stampSec
+      // ── 일기 (라벨·왼쪽 줄 없이) ──
+      + noteWithPhotos(e, sealed)
+      + kwSec
+      + C(stars()
+        + '<div class="r-meta"><span>무게</span><span class="dots">'+dots(e.iv)+'</span></div>'
+        + '<div class="r-meta" style="margin-top:3px"><span>일기 '+(e.note?e.note.length:0)+'자 · 사진 '+(e.photos?e.photos.length:0)+'</span><span>NO. '+e.no+'</span></div>')
+      + (sealed
+        ? barcode(e)
+        : barcode(e)
+          + '<div class="r-foot">'+nav+'</div>')
+      + '</div>';
+  }
+
+  // 사진 소스 — 날짜에서 실제 파일 경로 자동 도출(../vault/attachments/YYYY-MM-DD_NN.jpg).
+  //  p.src 있으면 우선, 없고 g만 있으면 그라디언트 폴백. (실빌드: GPS·EXIF 매칭)
+  var PH_BLANK="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
+  function psrc(e,i){ var p=(e.photos&&e.photos[i])||{};
+    if(p.src) return p.src;
+    if(p.file) return (window.__PH&&window.__PH[p.file])||PH_BLANK;
+    return PH_BLANK; }
+  function phattr(e,i){ var p=(e.photos&&e.photos[i])||{}; return p.file? ' data-ph="'+p.file+'"':''; }
+  function pbg(e,i){ return "background-image:url('"+psrc(e,i)+"')"; }
+  // 일기 문구 사이에 인쇄된 그림 한 장 (클릭하면 컬러 폴라로이드)
+  function drawn(e, i, sealed){
+    var p=e.photos[i];
+    var clk= sealed? '' : ' onclick="event.stopPropagation();PHOTO(\''+e.no+'\','+i+')"';
+    return '<figure class="drawn"'+clk+'><div class="dfrm"><img class="dimg" loading="lazy"'+phattr(e,i)+' src="'+psrc(e,i)+'" alt=""></div>'
+      +'<figcaption class="dcap">'+p.c+'</figcaption></figure>';
+  }
+  // 일기 본문을 문장 단위로 나눠 사진을 사이사이에 그림처럼 끼운다
+  function noteWithPhotos(e, sealed){
+    function C(html){ return sealed? '<div class="smudge">'+html+'</div>' : html; }
+    if(!e.note) return (e.photos&&e.photos.length)?('<div class="rule"></div>'+(function(h){return sealed?'<div class="sealph">'+h+'</div>':h;})(e.photos.map(function(p,i){return drawn(e,i,sealed);}).join(''))):'';
+    if(!e.photos || !e.photos.length)
+      return '<div class="rule"></div>'+C('<div class="note-you">'+e.note+'</div>');
+    var parts=e.note.split(/(?<=[.!?])\s+/).filter(function(s){return s.trim();});
+    var n=parts.length, np=e.photos.length, insAfter={};
+    for(var k=0;k<np;k++){
+      var pos=Math.round((k+1)*n/(np+1));
+      if(pos<1) pos=1;
+      if(n>1 && pos>n-1) pos=n-1;
+      (insAfter[pos]=insAfter[pos]||[]).push(k);
+    }
+    var out='', seg='';
+    function flush(){ if(seg.trim()) out+=C('<div class="note-you">'+seg+'</div>'); seg=''; }
+    for(var i=0;i<n;i++){
+      seg+=parts[i]+' ';
+      if(insAfter[i+1]) insAfter[i+1].forEach(function(pi){
+        flush();
+        out+= sealed? '<div class="sealph">'+drawn(e,pi,true)+'</div>' : drawn(e,pi,false);
+      });
+    }
+    flush();
+    return '<div class="rule"></div>'+out;
+  }
+  // 사진 = 영수증에 프린트된 것처럼 흑백 하프톤으로 작게 (클릭하면 컬러 폴라로이드)
+  function printedRow(e, sealed){
+    if(!e.photos||!e.photos.length) return '';
+    var imgs=e.photos.map(function(p,i){
+      var clk= sealed? '' : ' onclick="event.stopPropagation();PHOTO(\''+e.no+'\','+i+')"';
+      return '<div class="pph"'+clk+'><div class="pimg"'+phattr(e,i)+' style="'+pbg(e,i)+'"></div>'
+        +'<div class="pcap">'+p.c+'</div></div>';
+    }).join('');
+    var block='<div class="printed">'+imgs+'</div>';
+    return '<div class="rule"></div>'+(sealed?'<div class="smudge">'+block+'</div>':block);
+  }
+  // 컬러 사진 라이트박스 — 폴라로이드 버전 보존, 클릭으로 컬러 열람
+  window.PHOTO=function(no, idx){
+    var e=entries.filter(function(x){return x.no===no;})[0]; if(!e||!e.photos) return;
+    var lb=document.getElementById('lb'); if(!lb) return;
+    lb.className='ovl on';
+    lb.innerHTML='<div class="lbwrap" onclick="event.stopPropagation()">'
+      + e.photos.map(function(p,i){ return '<div class="print lbprint"><div class="img"'+phattr(e,i)+' style="'+pbg(e,i)+'"></div><div class="cap">'+p.c+'</div></div>'; }).join('')
+      + '<div class="fine" style="width:100%; margin-top:6px">폴라로이드 — 컬러 원본 · 아무 곳이나 눌러 닫기</div></div>';
+    lb.onclick=function(){ lb.className='ovl'; lb.innerHTML=''; };
+  };
+  function prints(e, developing){
+    if(!e.photos||!e.photos.length) return '';
+    var dev=developing? devInfo(e).frac.toFixed(2) : null;
+    var pos=[
+      'left:2px; top:96px; transform:rotate(-5deg)',
+      'right:2px; top:330px; transform:rotate(4.5deg)',
+      'left:22px; bottom:18px; transform:rotate(3deg)'
+    ];
+    return e.photos.map(function(p,i){
+      return '<div class="print'+(developing?' developing':'')+'" style="'+(pos[i]||pos[0])
+        +(developing?'; --dev:'+dev:'')+'">'
+        +'<div class="img"'+phattr(e,i)+' style="'+pbg(e,i)+'"></div>'
+        +'<div class="cap">'+(developing?'현상 중':p.c)+'</div></div>';
+    }).join('');
+  }
+
+  // 시간 봉인 — 실제 영수증이 초점 나간 것처럼. (실빌드에선 같은 구조의 대역 데이터를 흐림)
+  function dnum(d){var p=d.split('.').map(Number); return Date.UTC(p[0],p[1]-1,p[2])/86400000;}
+  function devInfo(e){
+    if(!e.unlock) return {frac:0, gone:0, left:"∞"};
+    var a=dnum(e.sealFrom||e.date), b=dnum(e.unlock), t=dnum(TODAY);
+    var total=Math.max(1,b-a), gone=Math.min(Math.max(t-a,0),total);
+    return {frac:gone/total, gone:Math.round(gone), left:Math.max(0,Math.round(b-t))};
+  }
+  function sealedReceipt(e){ return receipt(e, true); }
+
+  var current=(entries[0]||{}).no;  // 최신 기록(맨 위)부터 시작 — 번호 바뀌어도 안전
+  function single(){
+    var e=entries.filter(function(x){return x.no===current;})[0]||entries[0];
+    var idx=entries.indexOf(e);
+    var lk=!admin&&!isOpen(e);
+    var list=entries.map(function(x){
+      var xl=!admin&&!isOpen(x);
+      var on=x.no===current?' style="background:rgba(128,120,108,.14)"':'';
+      return '<div class="mrow"'+on+' onclick="GO(\'single\',\''+x.no+'\')">'
+        +'<span class="d">'+x.date.slice(2)+' '+x.wd+'</span>'
+        +'<span>'+(xl?'<span class="smudge-in">'+tit(x)+'</span>':tit(x))+'</span>'
+        +'<span class="v">'+(xl?'D-'+devInfo(x).left:dots(x.iv))+'</span></div>';
+    }).join('');
+    var cls=slideDir>0?' sl':(slideDir<0?' sr':''); slideDir=0;
+    if(freshAnim && e.no===freshNo){ cls+=' printin'; freshAnim=false; } // 첫 표시에만 인쇄 모션
+    // 월 레일 — 시간의 색인 (점선 길이 = 그 달의 기록 수, 누르면 그 달로)
+    var railHtml=(function(){
+      var seenM={}, rows=[];
+      entries.forEach(function(x){
+        var m=x.date.slice(0,7);
+        if(seenM[m]){ seenM[m]++; return; }
+        seenM[m]=1; rows.push({y:x.date.slice(0,4), m:m, mm:x.date.slice(5,7), no:x.no});
+      });
+      var cur=e.date.slice(0,7), out='', py='';
+      rows.forEach(function(r){
+        if(r.y!==py){ out+='<div class="yy">'+r.y+'</div>'; py=r.y; }
+        out+='<span class="mm'+(r.m===cur?' on':'')+'" onclick="GO(\'single\',\''+r.no+'\')" title="'+seenM[r.m]+'편">'
+          +'<span class="bar" style="width:'+Math.min(26,4+seenM[r.m]*1.6).toFixed(0)+'px"></span>'+r.mm+'</span>';
+      });
+      return '<div class="mrail">'+out+'</div>';
+    })();
+    // 좌우에 이웃 영수증 종이가 실제로 걸쳐 보임 (누르면 그쪽으로)
+    function peek(e2, side){
+      if(!e2) return '';
+      var inner=(!admin&&!isOpen(e2))? sealedReceipt(e2) : receipt(e2);
+      return '<div class="peek '+side+'" onclick="NAV('+(side==='l'?-1:1)+')">'
+        +'<div class="peek-in">'+inner+'</div></div>';
+    }
+    var peeks=peek(entries[idx+1],'l')+peek(entries[idx-1],'r');
+    var nav='<button class="snav l" onclick="NAV(-1)"'+(idx>=entries.length-1?' disabled':'')+' aria-label="이전">‹</button>'
+      +'<button class="snav r" onclick="NAV(1)"'+(idx<=0?' disabled':'')+' aria-label="다음">›</button>';
+    return '<div class="single">'
+      + '<div class="hint">'+(lk?'아직 흐림 — 날마다 조금씩 또렷해진다':'하루의 기록 한 장 · 옆 종이를 누르거나, ← → · 스와이프')+'</div>'
+      + railHtml
+      + '<div class="scene'+cls+'">'+peeks+(lk?receipt(e,true):receipt(e))+nav+'</div>'
+      + '<div class="mini-list"><div class="mh">— 영수증 목록 / ARCHIVE —</div>'+list+'</div>'
+      + '</div>';
+  }
+
+  // ── 주간 결산 — 주마다 자동으로 한 장씩 아카이빙 ────
+  var curWeekIdx=0;
+  function weekStartD(dateStr){ var q=dateStr.split('.').map(Number);
+    var dt=new Date(Date.UTC(q[0],q[1]-1,q[2])); var dow=(dt.getUTCDay()+6)%7;
+    dt.setUTCDate(dt.getUTCDate()-dow); return dt; }
+  function fmtDt(dt){ return dt.getUTCFullYear()+'.'+('0'+(dt.getUTCMonth()+1)).slice(-2)+'.'+('0'+dt.getUTCDate()).slice(-2); }
+  function weeksOf(){ var m={};
+    entries.forEach(function(e){ var k=fmtDt(weekStartD(e.date)); (m[k]=m[k]||[]).push(e); });
+    return Object.keys(m).sort().reverse().map(function(k){ return {k:k, list:m[k]}; }); }
+  function weekStats(w){
+    var open=w.list.filter(function(e){return admin||isOpen(e);});
+    var ph=open.reduce(function(t,e){return t+(e.photos?e.photos.length:0);},0);
+    var ivm=open.length? open.reduce(function(t,e){return t+e.iv;},0)/open.length : 0;
+    var places=[];
+    open.forEach(function(e){ (e.places||[e.pl]).forEach(function(q){
+      if(q&&q!=='—'&&q!=='카톡'&&places.indexOf(q)<0) places.push(q); }); });
+    var heavy=open.slice().sort(function(a,b){return b.iv-a.iv;})[0];
+    return {n:w.list.length, openN:open.length, sealedN:w.list.length-open.length,
+      ph:ph, iv:ivm, places:places.slice(0,5), heavy:heavy};
+  }
+  window.WNAV=function(d){ var ws=weeksOf();
+    curWeekIdx=Math.min(Math.max(curWeekIdx+d,0),ws.length-1); render(); };
+  function weekly(){
+    function compare(label, nowV, nowT, lastV, lastT){
+      var mx=Math.max(nowV,lastV)||1;
+      function barbar(v){ return Array(Math.max(1,Math.round(v/mx*16))+1).join('▮'); }
+      return '<div style="margin:5px 0 7px"><div class="li"><span style="flex:1">'+label+'</span></div>'
+        +'<div class="li"><span class="sub" style="width:38px">이번</span><span style="flex:1; color:var(--print)">'+barbar(nowV)+'</span><span class="sub">'+nowT+'</span></div>'
+        +'<div class="li"><span class="sub" style="width:38px">그전</span><span style="flex:1; color:var(--faint)">'+barbar(lastV)+'</span><span class="sub">'+lastT+'</span></div></div>';
+    }
+    var ws=weeksOf(); if(curWeekIdx>=ws.length) curWeekIdx=ws.length-1;
+    var w=ws[curWeekIdx], prev=ws[curWeekIdx+1];
+    var st=weekStats(w), sp=prev?weekStats(prev):null;
+    var endD=weekStartD(w.k); endD.setUTCDate(endD.getUTCDate()+6);
+    var range=w.k+' – '+fmtDt(endD).slice(5);
+    var body='<div class="receipt" style="width:372px; font-size:11.5px">'
+      + head(["한 주 — WEEKLY", range], undefined, "주간", "")
+      + '<div class="rule solid"></div>'
+      + '<div class="r-title">이 주의 기록</div>'
+      + '<div class="rule"></div>'
+      + '<div class="sec" style="color:var(--faint)">'+(prev?('기록이 있던 그전 주('+prev.k.slice(5)+' –)와 견주기'):'견줄 이전 주 없음 — 첫 주')+'</div>'
+      + '<div class="rule"></div>'
+      + compare("기록", st.n, st.n+'편', sp?sp.n:0, sp?sp.n+'편':'—')
+      + compare("사진", st.ph, st.ph+'장', sp?sp.ph:0, sp?sp.ph+'장':'—')
+      + '<div class="rule"></div>'
+      + '<div class="sec" style="color:var(--faint)">다녀온 곳 — PLACES</div>'
+      + (st.places.length? pathmap(st.places)
+         : '<div class="r-center" style="color:var(--faint); font-size:10px; margin:8px 0">이 주는 흐릿하거나, 집이거나</div>')
+      + '<div class="rule"></div>'
+      + '<div class="r-meta"><span>평균 무게</span><span class="dots">'+dots(Math.round(st.iv))+'</span></div>'
+      + (st.heavy? '<div class="r-meta" style="margin-top:3px"><span>가장 무거웠던 날</span>'
+          +'<span style="cursor:pointer" onclick="GO(\'single\',\''+st.heavy.no+'\')">'+st.heavy.date.slice(5)+' '+dots(st.heavy.iv)+'</span></div>':'')
+      + (st.sealedN? '<div class="r-meta" style="margin-top:3px"><span>아직 흐림</span><span>'+st.sealedN+'편</span></div>':'')
+      + stars()
+      + '<div class="r-foot">'
+      + (curWeekIdx<ws.length-1?'<span style="cursor:pointer" onclick="WNAV(1)">← 이전 주</span>':'<span style="color:var(--faint)">처음</span>')
+      + '&ensp;·&ensp;'
+      + (curWeekIdx>0?'<span style="cursor:pointer" onclick="WNAV(-1)">다음 주 →</span>':'<span style="color:var(--faint)">최근</span>')
+      + '</div>'
+      + '</div>';
+    var wnav='<button class="snav l" onclick="WNAV(1)"'+(curWeekIdx>=ws.length-1?' disabled':'')+' aria-label="이전 주">‹</button>'
+      +'<button class="snav r" onclick="WNAV(-1)"'+(curWeekIdx<=0?' disabled':'')+' aria-label="다음 주">›</button>';
+    return '<div class="single"><div class="hint">주간 · ← → · 스와이프로 주 넘기기 — '+(curWeekIdx+1)+' / '+ws.length+'</div>'
+      +'<div class="scene wk">'+body+wnav+'</div></div>';
+  }
+
+  function index(){
+    function _tally(a){var m={};a.forEach(function(x){if(x)m[x]=(m[x]||0)+1;});return Object.keys(m).map(function(k){return [k,m[k]];}).sort(function(p,q){return q[1]-p[1];});}
+    var _ppl=[],_plc=[],_thm=[],_emo=[],_stm={};
+    entries.forEach(function(e){
+      (e.people||[]).forEach(function(p){_ppl.push(p);});
+      if(e.pl&&e.pl!=='—') String(e.pl).split(/[·,\/\s]+/).forEach(function(x){if(x)_plc.push(x);});
+      (e.kws||[]).forEach(function(k){_thm.push(k);});
+      (e.mood||[]).forEach(function(m){_emo.push(m);});
+      (rawStamps(e)||[]).forEach(function(s){var k=s[0]+' '+s[1];_stm[k]=(_stm[k]||0)+1;});
+    });
+    var _stamps=Object.keys(_stm).map(function(k){return [k,_stm[k]];}).sort(function(p,q){return q[1]-p[1];});
+    var groups=[
+      {ko:"사람 / PERSON",items:_tally(_ppl).slice(0,8)},
+      {ko:"장소 / PLACE",items:_tally(_plc).slice(0,8)},
+      {ko:"도장 / STAMPS",items:_stamps.slice(0,10)},
+      {ko:"사건 · 주제 / THEME",items:_tally(_thm).slice(0,8)},
+      {ko:"감정 / EMOTION",items:_tally(_emo).slice(0,6)}
+    ].filter(function(g){return g.items.length;});
+    var _idxTotal=_tally(_ppl).length+_tally(_plc).length+_tally(_thm).length+_tally(_emo).length+_stamps.length;
+    var max=Math.max(1, groups.reduce(function(mx,g){return Math.max(mx, g.items.reduce(function(m2,it){return Math.max(m2,it[1]);},0));},0));
+    var blocks=groups.map(function(g){
+      var rows=g.items.map(function(it){
+        var bars=Math.max(1,Math.round(it[1]/max*14));
+        return '<div class="li" onclick="GO(\'single\')" style="cursor:pointer"><span>'+it[0]+'</span>'
+          +'<span style="flex:1; border-bottom:1px dotted var(--rule); align-self:flex-end; margin:0 2px 4px"></span>'
+          +'<span style="color:var(--faint); width:24px; text-align:right">'+it[1]+'</span></div>';
+      }).join('');
+      return '<div class="sec" style="text-align:left; color:var(--faint)">'+g.ko+'</div><div class="rule"></div>'+rows;
+    }).join('<div class="rule"></div>');
+    var body='<div class="receipt" style="width:372px; font-size:11.5px">'
+      + head(["색인 — INDEX","키워드 "+_idxTotal], undefined, "찾아보기", "")
+      + '<div class="rule solid"></div>'
+      + '<div class="sec">찾아보기 — 자주 나올수록 길게</div>'
+      + '<div class="rule"></div>'
+      + (blocks||'<div class="sec" style="color:var(--faint)">아직 색인할 데이터가 없어요</div>')
+      + stars()
+      + '<div class="r-foot">숫자 = 등장 횟수 · 누르면 그 기록으로</div>'
+      + stars()
+      + '</div>';
+    return '<div class="single">'+body+'</div>';
+  }
+
+  // ── 모아보기 — 영수증 다발(월) → 흩어보기 → 상세 ────
+  function monthsOf(){
+    var m={};
+    entries.forEach(function(e){var k=e.date.slice(0,7); (m[k]=m[k]||[]).push(e);});
+    return Object.keys(m).sort().reverse().map(function(k){return [k, m[k]];});
+  }
+  window.SETSPREAD=function(v){ spread=v; bundleMonth=null; render(); };
+  window.MODE=function(v){ spread=v; bundleMonth=null; state.s='bundles'; render();
+    document.getElementById('vp').scrollTo({top:0,behavior:'smooth'}); };
+  function spreadView(){
+    // 벽돌쌓기 — 일단 한 줄로 그려서 실측 높이를 얻고, SPINIT이 꽉 찬 벽으로 다시 쌓는다
+    var items=entries.map(function(e){
+      var open=admin||isOpen(e);
+      return '<div class="sitem" data-m="'+e.date.slice(0,7)+'" onclick="SPGO(\''+e.no+'\')">'+(open?receipt(e):sealedReceipt(e))+'</div>';
+    }).join('');
+    setTimeout(SPINIT,0);
+    return '<div class="single"><div class="hint">잡아서 상하좌우로 끈다 · 좌우는 끝없이 이어진다 · 위의 달을 누르면 그리로</div>'
+      +'<div class="sp-strip" id="spstrip"></div>'
+      +'<div class="spread-board" id="spbd" onscroll="SPWRAP()" onpointerdown="SPDOWN(event)" onmousemove="SPHOVER(event)" onmouseleave="SPLEAVE()">'
+      +'<div class="spread" id="spin"><div class="scol">'+items+'</div></div></div>';
+  }
+  // 실측 높이로 벽돌 패킹 → 월 스트립 → 순환 사본 → 오프스크린 렌더 생략
+  window.SPINIT=function(){
+    var bd=document.getElementById('spbd'), spin=document.getElementById('spin');
+    if(!bd||!spin||spin.classList.contains('ready')) return;
+    var nodes=Array.prototype.slice.call(spin.querySelectorAll('.sitem'));
+    if(!nodes.length) return;
+    var H=Math.max(1800, bd.clientHeight*4.8);
+    // 시간순을 지키되, 앞뒤 6편 창 안에서 남은 자리에 꼭 맞는 걸 골라 끼운다(바닥 들쭉임 최소화)
+    var queue=nodes.map(function(n){ return {n:n, h:n.getBoundingClientRect().height+11}; });
+    var cols=[], col=[], h=0;
+    while(queue.length){
+      var pick=0;
+      if(h>0){
+        pick=-1;
+        for(var i=0;i<Math.min(6,queue.length);i++){ if(h+queue[i].h<=H+30){ pick=i; break; } }
+        if(pick===-1){ cols.push(col); col=[]; h=0; pick=0; }
+      }
+      var it=queue.splice(pick,1)[0]; col.push(it); h+=it.h;
+    }
+    if(col.length) cols.push(col);
+    var frag=document.createDocumentFragment();
+    cols.forEach(function(list){ var d=document.createElement('div'); d.className='scol';
+      list.forEach(function(it){ d.appendChild(it.n); }); frag.appendChild(d); });
+    spin.innerHTML=''; spin.appendChild(frag);
+    // 열마다 실측 자리표시 크기 — 화면 밖 열이 들어올 때 레이아웃이 안 밀리게(깜빡임 방지)
+    Array.prototype.forEach.call(spin.children,function(c){
+      c.style.containIntrinsicSize='auto '+c.offsetWidth+'px auto '+c.offsetHeight+'px';
+    });
+    // 월 스트립 — 첫 사본 기준으로, 그 달이 처음 나오는 열로 점프
+    var monthCol={};
+    Array.prototype.forEach.call(spin.children,function(c,ci){
+      Array.prototype.forEach.call(c.children,function(s){ var m=s.getAttribute('data-m'); if(m&&!(m in monthCol)) monthCol[m]=ci; });
+    });
+    var st=document.getElementById('spstrip');
+    if(st) st.innerHTML=Object.keys(monthCol).map(function(m){
+      return '<span class="sm" onclick="SPJUMP('+monthCol[m]+')">'+m.slice(2)+'</span>';
+    }).join('<span class="sl-line"></span>');
+    // 순환 사본(cloneNode — innerHTML 왕복보다 빠름) + 화면 밖 렌더 생략 켜기
+    Array.prototype.slice.call(spin.children).forEach(function(c){ spin.appendChild(c.cloneNode(true)); });
+    spin.classList.add('ready');
+    bd.scrollLeft=bd.scrollWidth/2;
+  };
+  // 보드 항해 — 상하좌우 드래그(관성)·가장자리 흐름·좌우 순환. 끈 뒤의 클릭은 삼킨다.
+  var spDrag=null, spVx=0, spVy=0, spRaf=0, spSuppress=false, spEdge=0, spEdgeRaf=0;
+  window.SPGO=function(no){ if(spSuppress) return; GO('single',no); };
+  window.SPWRAP=function(){ var el=document.getElementById('spbd'); if(!el) return;
+    var W=el.scrollWidth/2; if(W<el.clientWidth) return;
+    if(el.scrollLeft>=W+1){ el.scrollLeft-=W; if(spDrag) spDrag.sl-=W; }
+    else if(el.scrollLeft<1){ el.scrollLeft+=W; if(spDrag) spDrag.sl+=W; } };
+  window.SPJUMP=function(ci){ var el=document.getElementById('spbd'); if(!el) return;
+    var c=el.querySelectorAll('.scol')[ci]; if(!c) return;
+    var W=el.scrollWidth/2, from=el.scrollLeft, raw=c.offsetLeft-24;
+    // 순환 보드에선 두 사본 중 가까운 쪽으로
+    var cand=[raw, raw+W], to=cand[0];
+    if(Math.abs(cand[1]-from)<Math.abs(cand[0]-from)) to=cand[1];
+    var t0=performance.now(), D=Math.min(900, 380+Math.abs(to-from)*0.02);
+    cancelAnimationFrame(spRaf);
+    (function step(){ var p=Math.min(1,(performance.now()-t0)/D), q=1-Math.pow(1-p,3);
+      el.scrollLeft=from+(to-from)*q; if(p<1) spRaf=requestAnimationFrame(step); })(); };
+  window.SPDOWN=function(ev){ var el=document.getElementById('spbd'); if(!el||ev.button||ev.pointerType==='touch') return;
+    spDrag={x:ev.clientX, y:ev.clientY, sl:el.scrollLeft, st:el.scrollTop, moved:false,
+      t:performance.now(), lx:ev.clientX, ly:ev.clientY};
+    spVx=0; spVy=0; cancelAnimationFrame(spRaf);
+    window.addEventListener('pointermove',spMove);
+    window.addEventListener('pointerup',spUp,{once:true}); };
+  function spMove(ev){ var el=document.getElementById('spbd'); if(!el||!spDrag) return;
+    var dx=ev.clientX-spDrag.x, dy=ev.clientY-spDrag.y;
+    if(!spDrag.moved && Math.abs(dx)+Math.abs(dy)>7){ spDrag.moved=true; el.classList.add('drag'); }
+    var now=performance.now(), dt=Math.max(1,now-spDrag.t);
+    spVx=(spDrag.lx-ev.clientX)/dt*16; spVy=(spDrag.ly-ev.clientY)/dt*16;
+    spDrag.t=now; spDrag.lx=ev.clientX; spDrag.ly=ev.clientY;
+    el.scrollLeft=spDrag.sl-dx; el.scrollTop=spDrag.st-dy; }
+  function spUp(){ window.removeEventListener('pointermove',spMove);
+    var bel=document.getElementById('spbd'); if(bel) bel.classList.remove('drag');
+    if(spDrag&&spDrag.moved){ spSuppress=true; setTimeout(function(){spSuppress=false;},0);
+      (function glide(){ var el=document.getElementById('spbd'); if(!el) return;
+        spVx*=.94; spVy*=.94;
+        if(Math.abs(spVx)>.4||Math.abs(spVy)>.4){ el.scrollLeft+=spVx; el.scrollTop+=spVy; spRaf=requestAnimationFrame(glide); } })(); }
+    spDrag=null; }
+  window.SPHOVER=function(ev){ var el=document.getElementById('spbd'); if(!el||spDrag) return;
+    var r=el.getBoundingClientRect(), m=76, x=ev.clientX;
+    spEdge = x<r.left+m? -(1-(x-r.left)/m) : x>r.right-m? (1-(r.right-x)/m) : 0;
+    if(spEdge&&!spEdgeRaf) (function drift(){ var el2=document.getElementById('spbd');
+      if(!el2||!spEdge){ spEdgeRaf=0; return; }
+      el2.scrollLeft+=spEdge*6; spEdgeRaf=requestAnimationFrame(drift); })(); };
+  window.SPLEAVE=function(){ spEdge=0; };
+  function bundles(){
+    if(spread && !bundleMonth) return spreadView();
+    if(bundleMonth){
+      var list=entries.filter(function(e){return e.date.slice(0,7)===bundleMonth;});
+      var cards=list.map(function(e){
+        if(!admin&&!isOpen(e)){
+          var dv=devInfo(e);
+          return '<div class="rmini" onclick="GO(\'single\',\''+e.no+'\')">'
+            +'<div class="r-meta" style="margin:0"><span>'+e.date.slice(5)+' '+e.wd+'</span><span>'+e.time+'</span></div>'
+            +'<div class="rule"></div>'
+            +'<div class="smudge" style="--dev:'+dv.frac.toFixed(2)+'">'
+            +'<div class="t">'+tit(e)+'</div>'
+            +(e.note?'<div class="ex">'+e.note+'</div>':'<div class="ex" style="text-align:center">—</div>')
+            +'</div>'
+            +'<div class="rule"></div>'
+            +'<div class="dcombo" style="margin:3px 0 0"><b style="font-size:11.5px">D-'+dv.left+'</b><span style="font-size:8px">'+opensAt(e).slice(5)+' 열림</span></div>'
+            +'</div>';
+        }
+        return '<div class="rmini" onclick="GO(\'single\',\''+e.no+'\')">'
+          +'<div class="r-meta" style="margin:0"><span>'+e.date.slice(5)+' '+e.wd+'</span><span>'+e.time+'</span></div>'
+          +'<div class="rule"></div>'
+          +'<div class="t">'+tit(e)+'</div>'
+          +(e.note?'<div class="ex">'+e.note+'</div>':'<div class="ex" style="text-align:center">(마음은 비어 있음)</div>')
+          +'<div class="rule"></div>'
+          +'<div class="r-meta" style="margin:0"><span class="dots">'+dots(e.iv)+'</span><span>'+(e.photos?'사진 '+e.photos.length:'—')+'</span></div>'
+          +'</div>';
+      }).join('');
+      return '<div class="single">'
+        +'<div class="hint">'+bundleMonth+' — '+list.length+'편 · <span style="cursor:pointer; border-bottom:1px solid var(--faint)" onclick="GO(\'bundles\')">← 다발로 돌아가기</span></div>'
+        +'<div class="rgrid">'+cards+'</div></div>';
+    }
+    // 핀에 꽂힌 월 다발 — 매수만큼 겹장이 쌓여 실제로 두꺼워 보임
+    var rots=[-4.4,3.2,-2.5,4.7,-3.3,2.3,-1.6,3.9];
+    var shelf=monthsOf().map(function(pair){
+      var k=pair[0], list=pair[1], n=list.length;
+      var sealedAll=!admin&&list.every(function(e){return !isOpen(e);});
+      // 봉인된 달 = 반투명 봉투에 담긴 채 (안이 흐릿하게 비침)
+      if(sealedAll){
+        var firstOpen=devInfo(list[list.length-1]).left;
+        // 담긴 편수만큼 속지가 겹쳐 보임 (많은 달 = 도톰한 봉투)
+        var ghosts='';
+        for(var gi=Math.min(n,3)-1; gi>=1; gi--){
+          ghosts+='<div class="inner ghosted" style="transform:rotate('+(gi%2?-3.5:3)+'deg) translate('+(gi*3)+'px,'+(gi*2)+'px)"></div>';
+        }
+        return '<div class="benv" onclick="GO(\'bundles\',\''+k+'\')"><div class="benv-in">'
+          + ghosts
+          +'<div class="inner">'
+          +'<div class="gl" style="width:54%; margin:2px auto 6px"></div>'
+          +'<div class="rule"></div>'
+          +'<div class="gl" style="width:78%"></div><div class="gl" style="width:90%"></div>'
+          +'<div class="gl" style="width:64%"></div><div class="gl" style="width:84%"></div>'
+          +'<div class="gl" style="width:58%"></div><div class="gl" style="width:72%"></div>'
+          +'<div class="gl" style="width:66%"></div>'
+          +'</div>'
+          +'<div class="flap"></div>'
+          +'<div class="label"><b>'+k+'</b>'+n+'편 · D-'+firstOpen+' 첫 열림</div>'
+          +'</div></div>';
+      }
+      var sheets='';
+      for(var i=Math.min(n-1,7);i>=1;i--){
+        sheets+='<div class="sheet" style="transform:rotate('+rots[i%8]+'deg) translate('
+          +(((i%3)-1)*3)+'px,'+(((i%2)?-1:1)*2)+'px); filter:drop-shadow(0 4px 8px rgba(20,14,8,.08))"></div>';
+      }
+      var avg=Math.round(list.reduce(function(s,e){return s+e.iv;},0)/n);
+      var ph=list.reduce(function(s,e){return s+(e.photos?e.photos.length:0);},0);
+      var front='<div class="sheet s1">'
+          +'<div class="r-meta" style="margin:0; font-size:9px"><span>ARCHIVE</span><span>NO.'+list[list.length-1].no+'–'+list[0].no+'</span></div>'
+          +'<div class="rule"></div>'
+          +'<div style="font-size:19px; font-weight:700; text-align:center; margin:12px 0 5px; letter-spacing:1px">'+k+'</div>'
+          +'<div class="r-center" style="font-size:9.5px; color:var(--faint)">평균 '+dots(avg)+' · 사진 '+ph+'</div>'
+          +'</div>';
+      return '<div class="bundle" style="height:'+(146+Math.min(n,8)*4)+'px" onclick="GO(\'bundles\',\''+k+'\')">'
+        + sheets + front
+        + (function(){ var fN=list.filter(function(e){return freshSet[e.no];}).length;
+            return '<div class="band">묶음 — '+n+'편'+(fN?' · 새 '+fN:'')+'</div>'; })()
+        + '<div class="pin"><div class="phead"></div><div class="pneedle"></div></div>'
+        + '</div>';
+    }).join('');
+    return '<div class="single"><div class="hint">열린 달은 핀에, 아직인 달은 봉투에 · 모아보기를 한 번 더 누르면 펼쳐보기</div>'
+      +'<div class="bshelf">'+shelf+'</div></div>';
+  }
+
+  // ── 지도 — 위치 베이스 정리 ─────────────────────────
+  function mapview(){
+    var pos={ "서촌":[215,120], "광화문":[245,140], "동대문":[310,150], "회기":[360,95],
+      "해방촌":[240,195], "용산":[225,235], "이촌":[255,255], "서울역":[210,180],
+      "홍대":[120,175], "합정":[100,195], "연남":[120,145], "상암":[60,130],
+      "신림":[140,300], "부천":[22,240], "관악":[178,312] };
+    var vis=entries.filter(function(e){return admin||isOpen(e);});
+    var NB={"서촌":[37.579,126.970],"광화문":[37.572,126.976],"종로":[37.570,126.991],"을지로":[37.566,126.991],"충무로":[37.561,126.994],"명동":[37.563,126.985],"동대문":[37.571,127.009],"회기":[37.590,127.053],"경희대":[37.596,127.052],"청량리":[37.580,127.047],"용산":[37.529,126.965],"이촌":[37.522,126.974],"해방촌":[37.545,126.985],"남산":[37.551,126.988],"서울역":[37.556,126.972],"홍대":[37.556,126.923],"합정":[37.549,126.914],"망원":[37.556,126.910],"연남":[37.561,126.925],"상암":[37.579,126.889],"수색":[37.581,126.900],"신촌":[37.559,126.937],"성수":[37.544,127.056],"건대":[37.540,127.070],"왕십리":[37.561,127.037],"군자":[37.557,127.079],"강남":[37.498,127.028],"잠실":[37.513,127.100],"여의도":[37.521,126.924],"영등포":[37.516,126.907],"노원":[37.654,127.056],"관악":[37.469,126.951],"신림":[37.484,126.930],"사당":[37.476,126.981],"부천":[37.503,126.766],"고양":[37.668,126.749],"분당":[37.441,127.133]};var OUT={"부천":1,"고양":1,"분당":1};var _prj=function(la,lo){return [55+(lo-126.80)/0.38*360, 45+(37.70-la)/0.26*280];};
+    function _places(e){return (e.places&&e.places.length)?e.places:((e.pl&&e.pl!=='—')?String(e.pl).split(/[·,\/\s]+/).filter(Boolean):[]);}
+    var cnt={}, latest={};
+    vis.forEach(function(e){_places(e).forEach(function(p){cnt[p]=(cnt[p]||0)+1; if(!latest[p])latest[p]=e.no;});});
+    var items=[];
+    Object.keys(cnt).forEach(function(p){ if(!NB[p])return; var xy=_prj(NB[p][0],NB[p][1]); items.push({p:p,x:xy[0],y:xy[1],c:cnt[p],no:latest[p]}); });
+    // 핵심 원만 — 상위 10곳. 나머지는 아래 목록이 담당 (지도는 그래픽, 목록은 데이터)
+    items.sort(function(a,b){return b.c-a.c;});
+    var omitted=Math.max(0,items.length-10);
+    items=items.slice(0,10);
+    items.forEach(function(a){a.fs=8.5+Math.sqrt(a.c)*2.0; a.r=Math.max(14,a.p.length*a.fs*0.5);}); // 글자 크기 = 빈도(sqrt), r은 충돌용 반폭
+    // 충돌 회피: 겹치는 원을 서로 밀어냄
+    for(var _t=0;_t<160;_t++){for(var _i=0;_i<items.length;_i++)for(var _j=_i+1;_j<items.length;_j++){var A=items[_i],B=items[_j],dx=B.x-A.x,dy=B.y-A.y,d=Math.sqrt(dx*dx+dy*dy)||0.01,mn=A.r+B.r+8;if(d<mn){var pu=(mn-d)/2/d;A.x-=dx*pu;A.y-=dy*pu;B.x+=dx*pu;B.y+=dy*pu;}}}
+    items.forEach(function(a){a.x=Math.max(a.r+4,Math.min(636-a.r,a.x));a.y=Math.max(a.r+8,Math.min(320-a.r,a.y));});
+    var nodes='';
+    items.forEach(function(a){ // 타이포그래피 지도 — 글자 자체가 마커, 크기 = 빈도
+      nodes+='<g class="mapnode" data-no="'+a.no+'">'
+        +'<text x="'+a.x.toFixed(1)+'" y="'+(a.y+a.fs*0.35).toFixed(1)+'" text-anchor="middle" font-family="var(--mono)" font-weight="500" font-size="'+a.fs.toFixed(1)+'" letter-spacing="0.5" fill="'+(OUT[a.p]?'var(--faint)':'var(--print)')+'">'+a.p+'</text></g>';
+    });
+    if(omitted) nodes+='<text x="632" y="334" text-anchor="end" font-family="var(--mono)" font-size="8.5" fill="var(--faint)" letter-spacing="1">+ 그 외 '+omitted+'곳 — 아래 목록</text>';
+    var far='';
+    var zone='<ellipse cx="235" cy="185" rx="185" ry="145" fill="none" stroke="rgba(28,26,23,.28)" stroke-width="1" stroke-dasharray="2 4"/>'
+      +'<text x="235" y="28" text-anchor="middle" font-family="var(--mono)" font-size="9" fill="var(--faint)" letter-spacing="2">SEOUL</text>';
+    var list=Object.keys(cnt).sort(function(a,b){return cnt[b]-cnt[a];}).map(function(p,i){
+      var n=('0'+(i+1)).slice(-2);
+      return '<div class="li" style="cursor:pointer" onclick="GO(\'single\',\''+latest[p]+'\')">'
+        +'<span class="n">'+n+'.</span><span>'+p+'</span>'
+        +'<span style="flex:1; border-bottom:1px dotted var(--rule); align-self:flex-end; margin:0 2px 4px"></span>'
+        +'<span style="color:var(--faint); width:20px; text-align:right">'+cnt[p]+'</span></div>';
+    }).join('');
+    return '<div class="single"><div class="hint">지도 · 기록이 쌓이는 자리 — 자주 갈수록 이름이 커진다</div>'
+      +'<div class="mappaper">'
+      +'<div class="r-meta"><span>지도 — PLACES</span><span>'+(admin?'전체 기록':'열린 기록 기준')+'</span></div>'
+      +'<div class="rule solid"></div>'
+      +'<svg viewBox="0 0 640 340" preserveAspectRatio="xMidYMid meet">'+zone+far+nodes+'</svg>'
+      +'<div class="rule"></div>'
+      +list
+      +'<div class="rule"></div>'
+      +'<div class="r-foot" style="color:var(--faint)">글자 크기 = 기록 수 · 누르면 그곳의 최근 기록으로</div>'
+      +'</div></div>';
+  }
+
+
+
+  var R={single:single, bundles:bundles, map:mapview, weekly:weekly, index:index};
+  window.GO=function(s, arg){ if(s==='single'&&arg){current=arg;} if(s==='bundles'){bundleMonth=arg||null;} state.s=s; render();
+    document.getElementById('vp').scrollTo({top:0,behavior:'smooth'}); };
+
+  // ── 기록 좌우 슬라이드 ──────────────────────────────
+  window.NAV=function(d){
+    var e=entries.filter(function(x){return x.no===current;})[0]||entries[0];
+    var ni=entries.indexOf(e)-d;
+    if(ni<0||ni>=entries.length) return;
+    slideDir=d; current=entries[ni].no; state.s='single'; render();
+  };
+
+  // ── 관리자 모드 — 비밀 동작(워드마크 3연타) → 비밀번호 ──
+  window.OVERLAY=function(show){
+    var o=document.getElementById('ovl');
+    if(!show){o.className='ovl'; o.innerHTML=''; return;}
+    o.className='ovl on';
+    o.innerHTML='<div class="receipt" style="width:300px">'
+      +'<div class="r-center"><div class="r-wordmark">기록</div>'
+      +'<div class="r-tag">ADMIN — 전체 열람</div></div>'
+      +'<div class="rule solid"></div>'
+      +'<div class="sec">비밀번호 — PASSWORD</div>'
+      +'<div class="pw"><input id="pwin" type="password" placeholder="········" aria-label="비밀번호"'
+      +' onkeydown="if(event.key===\'Enter\')UNLOCK()"><button onclick="UNLOCK()">열기</button></div>'
+      +'<div class="rule"></div>'
+      +'<div class="fine">아직 열리지 않은 기록까지 전부 보입니다.<br>비밀번호는 이 기기 밖으로 나가지 않습니다.</div>'
+      +stars()
+      +'<div class="r-foot" style="margin-top:6px"><span style="cursor:pointer" onclick="OVERLAY(false)">닫기</span></div>'
+      +'</div>';
+    var inp=document.getElementById('pwin'); if(inp&&inp.focus) inp.focus();
+  };
+  window.UNLOCK=function(){var v=(document.getElementById('pwin')||{}).value||'';
+    crypto.subtle.digest('SHA-256', new TextEncoder().encode(v)).then(function(buf){
+      var h=Array.prototype.map.call(new Uint8Array(buf),function(b){return ('0'+b.toString(16)).slice(-2);}).join('');
+      if(window.__ADMIN_HASH__&&h===window.__ADMIN_HASH__){admin=true; window.__ADM__=1; OVERLAY(false); render();}
+      else{var el=document.getElementById('pwin'); if(el){el.value=''; el.style.borderBottomColor='#b24a32';}}
+    });};
+  window.RELOCK=function(){admin=false; window.__ADM__=0; render();};
+  var tapN=0, tapT=0;
+  window.SECRETTAP=function(){ var now=Date.now();
+    if(now-tapT>1600) tapN=0;
+    tapT=now; tapN++;
+    if(tapN>=3){tapN=0; if(!admin) OVERLAY(true);} };
+  function render(){
+    document.getElementById('vp').innerHTML=R[state.s]();
+    function micStack(cur){ return '<span class="mic'+(cur?' cur':'')+'" title="모아보기" onclick="event.stopPropagation();MODE(false)"><svg viewBox="0 0 12 12" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.1"><rect x="3.4" y="1.2" width="5.2" height="7" transform="rotate(-6 6 4.7)"/><rect x="3.4" y="2.6" width="5.2" height="7" transform="rotate(5 6 6.1)"/><rect x="3.4" y="4" width="5.2" height="7"/></svg></span>'; }
+    function micGrid(cur){ return '<span class="mic'+(cur?' cur':'')+'" title="펼쳐보기" onclick="event.stopPropagation();MODE(true)"><svg viewBox="0 0 12 12" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.1"><rect x="1.2" y="1.2" width="4" height="5.4"/><rect x="6.8" y="1.2" width="4" height="3.6"/><rect x="1.2" y="8.2" width="4" height="2.6"/><rect x="6.8" y="6.4" width="4" height="4.4"/></svg></span>'; }
+    document.querySelectorAll('#tabs button').forEach(function(b){
+      b.classList.toggle('on', b.dataset.s===state.s);
+      if(b.dataset.s==='bundles'){
+        var act=(state.s==='bundles' && !bundleMonth);
+        var lbl=(act && spread)?'펼쳐보기':'모아보기';
+        b.innerHTML=lbl+'<span class="modeic">'+micStack(!(act&&spread))+micGrid(act&&spread)+'</span>';
+        b.title='한 번 더 누르면 '+((act&&spread)?'모아보기':'펼쳐보기')+'로';
+      }
+    });
+    var adm=document.getElementById('adm');
+    if(adm) adm.innerHTML=admin?'<button class="on" onclick="RELOCK()">전체 열람 중 · 잠그기</button>':'';
+  }
+  function build(){
+    var t=document.getElementById('tabs');
+    t.innerHTML=screens.map(function(s){return '<button data-s="'+s[0]+'">'+s[1]+'</button>';}).join('');
+    t.querySelectorAll('button').forEach(function(b){b.onclick=function(){
+      if(b.dataset.s==='bundles'){
+        if(state.s==='bundles' && !bundleMonth){ spread=!spread; render(); document.getElementById('vp').scrollTo({top:0,behavior:'smooth'}); }
+        else { spread=false; GO('bundles'); }
+      } else GO(b.dataset.s);
+    };});
+    var tb=document.getElementById('themebtn');
+    function paintTheme(){ try{localStorage.setItem('theme',state.theme);}catch(e){} document.body.dataset.theme=state.theme; tb.innerHTML=bulbSvg(state.theme==='dark'); }
+    tb.onclick=function(){ state.theme=(state.theme==='dark')?'light':'dark'; paintTheme(); };
+    paintTheme();
+    document.addEventListener('keydown', function(ev){
+      if(ev.key==='Escape'){OVERLAY(false); var lb=document.getElementById('lb'); if(lb){lb.className='ovl'; lb.innerHTML='';} return;}
+      if(state.s==='single'){ if(ev.key==='ArrowRight') NAV(1); if(ev.key==='ArrowLeft') NAV(-1); }
+      else if(state.s==='weekly'){ if(ev.key==='ArrowRight') WNAV(-1); if(ev.key==='ArrowLeft') WNAV(1); }
+    });
+    // 모바일 스와이프 (기록·주간)
+    var vp=document.getElementById('vp'), tx=0, ty=0;
+    if(vp&&vp.addEventListener){
+      vp.addEventListener('touchstart', function(ev){
+        var t=ev.touches[0]; tx=t.clientX; ty=t.clientY;
+      }, {passive:true});
+      vp.addEventListener('touchend', function(ev){
+        var t=ev.changedTouches[0], dx=t.clientX-tx, dy=t.clientY-ty;
+        if(!(Math.abs(dx)>48 && Math.abs(dx)>Math.abs(dy)*1.5)) return;
+        if(state.s==='single') NAV(dx<0?1:-1);
+        else if(state.s==='weekly') WNAV(dx<0?-1:1);
+      }, {passive:true});
+    }
+  }
+  window.__BOOT__=function(list){ if(window.__NOW__) TODAY=window.__NOW__; entries=(list&&list.length?list:[]); current=(entries[0]||{}).no; landing(); build(); render(); };
+})();
+</script>
+
+<script type="module">
+  import { decryptContent } from "./js/crypto.js";
+  const $ = (s) => document.querySelector(s);
+  const WD = ["일","월","화","수","목","금","토"];
+
+  // 본문(## 한 일 / ## 일기) 분리 → log[[text,""]], note
+  function splitBody(body) {
+    const src = body || "";
+    const logM = src.match(/##\s*한 일\s*\n([\s\S]*?)(?=\n##|$)/);
+    const noteM = src.match(/##\s*일기\s*\n([\s\S]*)$/);
+    const log = logM
+      ? logM[1].split("\n").map((s) => s.trim()).filter((s) => s.startsWith("-")).map((s) => [s.replace(/^-\s*/, ""), ""])
+      : [];
+    let note = noteM ? noteM[1].trim() : "";
+    if (!logM && !noteM) note = src.trim();
+    return { log, note };
+  }
+
+  // 매니페스트 카드 → 목업 entry
+  function cardsToEntries(cards) {
+    var _arr = (cards || [])
+      .filter((c) => c.date)
+      .slice()
+      .sort((a, b) => b.date.localeCompare(a.date)) // 최신 먼저
+      .map((c) => {
+        const dot = c.date.replace(/-/g, ".");
+        const wd = WD[new Date(c.date + "T00:00:00").getDay()];
+        const { log, note } = splitBody(c.body);
+        const photos = (c.photos || []).map((p) => ({
+          src: p.src || null,
+          file: p.file || null,
+          mime: p.mime || "image/jpeg",
+          c: [c.location || "", dot.slice(5)].filter(Boolean).join(" · "),
+        }));
+        const iv = Math.max(1, Math.min(5,
+          1 + Math.min(3, Math.round(note.length / 220)) + Math.min(2, Math.ceil((c.photos ? c.photos.length : 0) / 3))));
+        const empty = c.title === dot;
+        return {
+          no: c.id, date: dot, wd, time: c.time || "", pl: c.location || "—",
+          iv, unlock: c.unlock ? c.unlock.replace(/-/g, ".") : null,
+          sealFrom: c.sealFrom ? c.sealFrom.replace(/-/g, ".") : null,
+          t: empty ? "" : (c.title || ""), geo: c.location || "",
+          places: c.places || [],
+          log, note, kws: c.tags || [], people: c.people || [], mood: c.mood || [], photos,
+          sky: c.sky || "", temp: c.temp || "", hum: c.hum || "",
+        };
+      });
+    _arr.forEach(function (e, i) { e.seq = _arr.length - i; }); // 연대순 일련번호(오래된=1)
+    return _arr;
+  }
+
+  // 게이트 테마 토글 (목업 전구 아이콘, body[data-theme] 사용) — localStorage 복원·저장
+  (function () {
+    try { const t = localStorage.getItem("theme"); if (t) document.body.dataset.theme = t; } catch (e) {}
+    const btn = $("#gate-theme");
+    function bulb(on) {
+      return '<svg viewBox="0 0 24 24" width="13" height="13" fill="' + (on ? "currentColor" : "none") +
+        '" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' +
+        '<path d="M8.5 15.2a6 6 0 1 1 7 0c-.75.6-1 1.2-1 2.3h-5c0-1.1-.25-1.7-1-2.3z"/>' +
+        '<path d="M9.5 20h5M10.5 22h3" fill="none"/></svg>';
+    }
+    function paint() { btn.innerHTML = bulb(document.body.dataset.theme === "dark"); }
+    btn.addEventListener("click", function () {
+      document.body.dataset.theme = document.body.dataset.theme === "dark" ? "light" : "dark";
+      try { localStorage.setItem("theme", document.body.dataset.theme); } catch (e) {}
+      paint();
+    });
+    paint();
+  })();
+
+  // 복호화 게이트
+  const fmtSeoul = (d) => { try { return new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(d).replace(/-/g, "."); } catch { return d.toISOString().slice(0, 10).replace(/-/g, "."); } };
+  let encText;
+  try {
+    const res = await fetch("content.enc");
+    if (!res.ok) throw new Error();
+    // 열림 판정은 기기 시계가 아니라 서버 시각으로 — 시계 돌리기 무력화
+    const sd = res.headers.get("date");
+    window.__NOW__ = fmtSeoul(sd ? new Date(sd) : new Date());
+    const cl = fmtSeoul(new Date());
+    if (Math.abs(Date.parse(cl.replace(/\./g, "-")) - Date.parse(window.__NOW__.replace(/\./g, "-"))) >= 2 * 86400000)
+      tattle("clock", "기기 시계가 서버와 다름 (기기 " + cl + " · 서버 " + window.__NOW__ + ")");
+    encText = await res.text();
+  } catch {
+    $("#gate-error").textContent = "콘텐츠를 불러오지 못했어요. npm run build 를 먼저 실행했는지 확인해줘.";
+    $("#gate-error").hidden = false;
+  }
+
+  async function derivePhotoKey(pw, salt) {
+    const enc = new TextEncoder();
+    const bk = await crypto.subtle.importKey("raw", enc.encode(pw), "PBKDF2", false, ["deriveKey"]);
+    return crypto.subtle.deriveKey(
+      { name: "PBKDF2", salt: enc.encode(salt), iterations: 200000, hash: "SHA-256" },
+      bk, { name: "AES-GCM", length: 256 }, false, ["decrypt"]
+    );
+  }
+
+  async function unlock(pw) {
+    const manifest = await decryptContent(encText, pw); // 틀리면 throw
+    window.__ADMIN_HASH__ = (manifest.site && manifest.site.adminHash) || null;
+    const entries = cardsToEntries(manifest.cards);
+    window.__PHMIME = {};
+    entries.forEach((en) => (en.photos || []).forEach((p) => { if (p.file) window.__PHMIME[p.file] = p.mime || "image/jpeg"; }));
+    window.__PHKEY = await derivePhotoKey(pw, (manifest.site && manifest.site.photoSalt) || "girok-photos-v1");
+    sessionStorage.setItem("pw", pw);
+    const g = $("#gate"); if (g) g.remove();
+    window.__BOOT__(entries);
+    var _eid = new URLSearchParams(location.search).get("e");
+    if (_eid && window.GO) window.GO("single", _eid);
+    (function(){var vp=document.getElementById("vp");if(!vp||vp.__bcobs)return;vp.__bcobs=1;function fill(){if(!window.JsBarcode)return;vp.querySelectorAll("svg.bc-code:empty").forEach(function(el){try{window.JsBarcode(el,el.getAttribute("data-code"),{format:"CODE128",width:1,height:34,margin:0,displayValue:false,lineColor:"#1c1a17",background:"transparent"});var w=parseFloat(el.getAttribute("width")),h=parseFloat(el.getAttribute("height"));if(w&&h){el.setAttribute("viewBox","0 0 "+w+" "+h);el.setAttribute("preserveAspectRatio","none");el.removeAttribute("width");el.removeAttribute("height");}}catch(e){}});}new MutationObserver(fill).observe(vp,{childList:true,subtree:true});fill();vp.addEventListener("click",function(ev){var d=ev.target&&ev.target.closest&&ev.target.closest(".mapnode");if(d&&d.getAttribute("data-no")&&window.GO){ev.stopPropagation();window.GO("single",d.getAttribute("data-no"));}});})();
+  }
+
+  const saved = sessionStorage.getItem("pw");
+  if (saved) { try { await unlock(saved); } catch { sessionStorage.removeItem("pw"); } }
+
+  const form = $("#gate-form");
+  if (form) {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const pw = $("#gate-input").value;
+      $("#gate-error").hidden = true;
+      $("#gate-btn").textContent = "여는 중…";
+      try { await unlock(pw); }
+      catch {
+        $("#gate-error").textContent = "비밀번호가 맞지 않아요";
+        $("#gate-error").hidden = false;
+        $("#gate-btn").textContent = "열기";
+        $("#gate-input").select();
+      }
+    });
+    $("#gate-input").focus();
+  }
+
+  // ── 사진 지연 로딩 — [data-ph] 요소를 발견하면 photos/<해시>.enc 받아서 복호화 ──
+  window.__PH = {};
+  const phBusy = {};
+  async function phload(file) {
+    if (!window.__PHKEY || window.__PH[file] || phBusy[file]) return;
+    phBusy[file] = 1;
+    try {
+      const r = await fetch(file);
+      if (!r.ok) throw 0;
+      const buf = new Uint8Array(await r.arrayBuffer());
+      const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: buf.slice(0, 12) }, window.__PHKEY, buf.slice(12));
+      window.__PH[file] = URL.createObjectURL(new Blob([pt], { type: (window.__PHMIME || {})[file] || "image/jpeg" }));
+      phApply(file);
+    } catch (e) { phBusy[file] = 0; }
+  }
+  function phApply(file) {
+    const url = window.__PH[file];
+    document.querySelectorAll("[data-ph]").forEach((el) => {
+      if (el.getAttribute("data-ph") !== file || el.classList.contains("phloaded")) return;
+      if (el.tagName === "IMG") el.src = url;
+      else el.style.backgroundImage = "url('" + url + "')";
+      el.classList.add("phloaded");
+    });
+  }
+  function phSweep() {
+    document.querySelectorAll("[data-ph]").forEach((el) => {
+      const f = el.getAttribute("data-ph");
+      if (!f) return;
+      if (window.__PH[f]) phApply(f); else phload(f);
+    });
+  }
+  new MutationObserver(phSweep).observe(document.body, { childList: true, subtree: true });
+
+  // ── 봉인 감시 — 조작이 감지되면 월하에게 푸시(ntfy) + 화면에 한 줄 ──
+  const NTFY = "https://ntfy.sh/girok-hyunsang-x9k42mprw7";
+  function tattle(kind, msg) {
+    if (window.__ADM__) return;
+    try { if (sessionStorage.getItem("tt_" + kind)) return; sessionStorage.setItem("tt_" + kind, "1"); } catch (e) {}
+    try { fetch(NTFY, { method: "POST", headers: { Title: "girok seal", Priority: "high", Tags: "rotating_light" },
+      body: msg + " — " + new Date().toLocaleString("ko-KR") }); } catch (e) {}
+    warnLine();
+  }
+  function warnLine() {
+    if (document.getElementById("tattle-warn")) return;
+    const d = document.createElement("div");
+    d.id = "tattle-warn";
+    d.textContent = "현상 중인 기록을 억지로 열면 빛이 새요 — 이 일은 월하에게 전해집니다.";
+    d.style.cssText = "position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:200;"
+      + "background:var(--paper,#fff);color:var(--print,#1a1a1a);border:1px solid currentColor;padding:9px 14px;"
+      + "font-family:var(--mono,monospace);font-size:10.5px;letter-spacing:.3px;box-shadow:0 8px 20px rgba(0,0,0,.18);"
+      + "max-width:88vw;text-align:center";
+    document.body.appendChild(d);
+    setTimeout(() => d.remove(), 9000);
+  }
+  // 흐림(블러)이 강제로 벗겨진 화면 감지
+  setInterval(() => {
+    if (window.__ADM__) return;
+    const s = document.querySelector(".receipt .smudge");
+    if (s && (getComputedStyle(s).filter || "").indexOf("blur") === -1)
+      tattle("blur", "봉인 흐림이 해제된 화면이 감지됨");
+  }, 6000);
+  // 개발자도구 감지 — 콘솔이 이 요소를 그리는 순간 getter가 발동
+  (function () {
+    const probe = new Image();
+    Object.defineProperty(probe, "id", { get: function () { tattle("devtools", "개발자도구가 열림"); return ""; } });
+    console.log(probe);
+  })();
+</script>
+</body>
+</html>
